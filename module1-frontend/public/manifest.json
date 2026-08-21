@@ -1,0 +1,18 @@
+{
+  "name": "SAIV - Secure Attendance System",
+  "short_name": "SAIV",
+  "description": "Student check-in with liveness and location verification",
+  "start_url": "/checkin",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1d4ed8",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
