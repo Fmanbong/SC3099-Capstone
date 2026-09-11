@@ -2,71 +2,71 @@
 """ commentary
 - ALL our HTTP details will stay inside here
 - AS of 11092026
-	> the Login function has its own post request
-	> the dedicated POST function is for other POST requests
+    > the Login function has its own post request
+    > the dedicated POST function is for other POST requests
 """
 
 import requests
 
 class APIClient:
 
-	""" our object here is the thing module 4 uses to communicate with module 2
-	"""
+    """ our object here is the thing module 4 uses to communicate with module 2
+    """
 
-	def __init__(self, base_url):
-		self.base_url = base_url.rstrip("/")
-		self.token = None
-
-
-	def set_token(self, token):
-
-		""" token parameter is the JWT returned by module 2 after login
-		"""
-
-		self.token = token
+    def __init__(self, base_url):
+        self.base_url = base_url.rstrip("/")
+        self.token = None
 
 
-	def login(self, email, password):
-		response = requests.post(
-			f"{self.base_url}/api/v1/auth/login",
-			json={
-				"email": email,
-				"password": password,
-			}
-		)
-		response.raise_for_status()
+    def set_token(self, token):
 
-		data = response.json()
-		self.token = data["access_token"]
+        """ token parameter is the JWT returned by module 2 after login
+        """
 
-		return data
+        self.token = token
 
 
-	def get(self, endpoint):
-		headers = {}
+    def login(self, email, password):
+        response = requests.post(
+            f"{self.base_url}/api/v1/auth/login",
+            json={
+                "email": email,
+                "password": password,
+            }
+        )
+        response.raise_for_status()
 
-		if self.token:
-			headers["authorization"] = f"bearer {self.token}"
+        data = response.json()
+        self.token = data["access_token"]
 
-		response = requests.get(
-			f"{self.base_url}{endpoint}",
-			headers=headers
-		)
-		response.raise_for_status()
-
-		return response.json()  # this converts the resposne into PY data so we can work on it :)
-
-
-	def get_session(self, session_id):
-		return self.get(f"/api/v1/sessions/{session_id}")
+        return data
 
 
-	def get_sessions(self):
-		return self.get("/api/v1/sessions/")
+    def get(self, endpoint):
+        headers = {}
+
+        if self.token:
+            headers["authorization"] = f"bearer {self.token}"
+
+        response = requests.get(
+            f"{self.base_url}{endpoint}",
+            headers=headers
+        )
+        response.raise_for_status()
+
+        return response.json()  # this converts the resposne into PY data so we can work on it :)
 
 
-	def get_checkins(self):
-		return self.get("/api/v1/checkins/")
+    def get_session(self, session_id):
+        return self.get(f"/api/v1/sessions/{session_id}")
+
+
+    def get_sessions(self):
+        return self.get("/api/v1/sessions/")
+
+
+    def get_checkins(self):
+        return self.get("/api/v1/checkins/")
 
 
     def get_session_checkins(self, session_id):
@@ -97,42 +97,81 @@ class APIClient:
         return self.get("/api/v1/audit/")
 
 
-	def post(self, endpoint, data=None):
+    def post(self, endpoint, data=None):
 
-		""" data parameter is the information we are sending to the backend , however ,
-		it is optional
-		"""
+        """ data parameter is the information we are sending to the backend , however ,
+        it is optional
+        """
 
-		headers = {}
+        headers = {}
 
-		if self.token:
-			headers["authorization"] = f"bearer {self.token}"  # TODO - not sure what this does
+        if self.token:
+            headers["authorization"] = f"bearer {self.token}"  # TODO - not sure what this does
 
-		response = requests.post(
-			f"{self.base_url}{endpoint}",
-			json = data,
-			headers = headers
-		)
-		response.raise_for_status()
+        response = requests.post(
+            f"{self.base_url}{endpoint}",
+            json = data,
+            headers = headers
+        )
+        response.raise_for_status()
 
-		return response.json()
-
-
-	def create_session(self, data):
-		return self.post("/api/v1/sessions/", data)
+        return response.json()
 
 
-	def download(self, endpoint):
-		headers = {}
+    def create_session(self, data):
+        return self.post("/api/v1/sessions/", data)
 
-		if self.token:
-			headers["authorization"] = f"bearer {self.token}"
 
-		response = requests.get(
-			f"{self.base_url}{endpoint}",
-			headers = headers
-		)
-		response.raise_for_status()
+    def patch(self, endpoint, data=None):
+        headers = {}
+
+        if self.token:
+            headers["authorization"] = f"bearer {self.token}"
+
+        response = requests.patch(
+            f"{self.base_url}{endpoint}",
+            json = data,
+            headers = headers
+        )
+        response.raise_for_status()
+
+        return response.json()
+
+
+    def update_session(self, session_id, data):
+        return self.patch(f"/api/v1/sessions/{session_id}", data)
+
+
+    def delete(self, endpoint):
+        headers = {}
+
+        if self.token:
+            headers["authorization"] = f"bearer {self.token}"
+
+        response = requests.delete(
+            f"{self.base_url}{endpoint}",
+            headers = headers
+        )
+        response.raise_for_status()
+
+        return response
+
+
+    def delete_session(self, session_id):
+        return self.delete(f"/api/v1/sessions/{session_id}")
+
+
+    def download(self, endpoint):
+        headers = {}
+
+        if self.token:
+            headers["authorization"] = f"bearer {self.token}"
+
+        response = requests.get(
+            f"{self.base_url}{endpoint}",
+            headers = headers
+        )
+        response.raise_for_status()
 
         return response.content  # we want the actual bytes of the response if we using CSV
 

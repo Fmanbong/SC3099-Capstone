@@ -19,10 +19,68 @@ st.set_page_config(
 BACKEND_URL    = os.getenv("BACKEND_URL",    "http://localhost:8000")  # environment vars
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")  # environment vars
 
-api = APIClient(BACKEND_URL)
+
+if "api" not in st.session_state:  # asking if the current streamlit session already has an API client
+    st.session_state.api = APIClient(BACKEND_URL)
+
+if "logged in" not in st.session_state:
+    st.session_state.logged_in = False
 
 st.title("SAIV INSTRUCTOR DASHBOARD")
-st.write("TODO - perhaps put a nice welcome message here")
+
+if not st.session_state.logged_in:
+    st.subheader("INSTRUCTOR LOGIN")
+
+    email = st.text_input("email")
+    password = st.text_input("password", type="password")
+
+    if st.button("Login"):
+        try:
+            st.session_state.api.login(email, password)
+            st.session_state.login = True
+            st.success("Login success!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Login Failed : {e}")
+
+    st.stop()
+
+
+# navigation
+st.sidebar.title("NAVIGATION")
+page = st.sidebar.radio(  # this creates a group of selectable options
+    "GO TO",
+    [
+        "OVERVIEW",
+        "SESSIONS",
+        "CHECK-INS",
+        "AUDIT LOGS",
+        "METRICS",
+    ]
+)
+
+
+# pages
+if   page == "OVERVIEW":
+    st.header("overview")
+    st.write("TODO - overview dashboard goes here")
+
+elif page == "SESSIONS":
+    st.header("sessions")
+    st.write("TODO - session management goes here")
+
+elif page == "CHECK-INS":
+    st.header("check-ins")
+    st.write("TODO - check-ins monitoring goes here")
+
+elif page == "AUDIT LOGS":
+    st.header("audit logs")
+    st.write("TODO - audit logs goes here")
+
+elif page == "METRICS":
+    st.header("metrics")
+    st.write("TODO - metrics and system health goes here")
+
 
 
 # =============================================================================
@@ -87,18 +145,3 @@ st.write("TODO - perhaps put a nice welcome message here")
 # - Timestamp, Verification Status
 # - Risk Score, Liveness Score, Face Match Score
 # - GPS Coordinates (latitude, longitude)
-
-
-# onncera start of project
-
-st.subheader("SYSTEM SETUP")
-st.write(f"BACKEND_API - '{BACKEND_URL}'")
-st.write(f"PROMMETHEUS - '{PROMETHEUS_URL}'")
-st.success("HEHE")
-
-st.subheader("backend testing")
-try:
-    sessions = api.get_sessions()
-    st.write(sessions)
-except Exception as e:
-    st.error(f"could not connect to the backend : {e}")
