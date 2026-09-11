@@ -1,27 +1,29 @@
 """
-SAIV Instructor Dashboard - Module 4
+SAIV INSTRUCTOR DASHBOARD
 
-This is the skeleton implementation for the Observability module.
 Students must implement the instructor dashboard with session management,
-attendance monitoring, and metrics visualization.
+attendance monitoring , and metrics visualisation
 """
+
 
 import streamlit as st
 import os
+from api_client import APIClient
 
-# Page configuration
+# page setup
 st.set_page_config(
-    page_title="SAIV Instructor Dashboard",
-    page_icon="📊",
-    layout="wide"
+    page_title = "SAIV INSTRUCTOR DASHBOARD",
+    page_icon  = "O..O", layout     = "wide",  # Layout == 'page elements use the entire screen width
 )
 
-# Environment variables
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
+BACKEND_URL    = os.getenv("BACKEND_URL",    "http://localhost:8000")  # environment vars
+PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")  # environment vars
 
-st.title("SAIV Instructor Dashboard")
-st.write("Welcome to the Secure Attendance & Identity Verification System")
+api = APIClient(BACKEND_URL)
+
+st.title("SAIV INSTRUCTOR DASHBOARD")
+st.write("TODO - perhaps put a nice welcome message here")
+
 
 # =============================================================================
 # TODO: Implement the following pages/features
@@ -86,5 +88,17 @@ st.write("Welcome to the Secure Attendance & Identity Verification System")
 # - Risk Score, Liveness Score, Face Match Score
 # - GPS Coordinates (latitude, longitude)
 
-# Placeholder content
-st.info("This is a skeleton implementation. Please implement the required features.")
+
+# onncera start of project
+
+st.subheader("SYSTEM SETUP")
+st.write(f"BACKEND_API - '{BACKEND_URL}'")
+st.write(f"PROMMETHEUS - '{PROMETHEUS_URL}'")
+st.success("HEHE")
+
+st.subheader("backend testing")
+try:
+    sessions = api.get_sessions()
+    st.write(sessions)
+except Exception as e:
+    st.error(f"could not connect to the backend : {e}")
