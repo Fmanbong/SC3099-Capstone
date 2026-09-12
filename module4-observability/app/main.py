@@ -161,34 +161,36 @@ elif page == "SESSIONS":
     # TODO - temporary mock data
     # TODO - replace with st.session_state.api.get_sessions() when mod 2 is running
 
-    sessions = [
-        {
-            "id":          1,
-            "name":       "CS50 Lecture 1",
-            "course":     "CS50",
-            "status":     "active",
-            "start_time": "2026-03-01 10:00",
-            "end_time":   "2026-03-01 12:00"
-        },
+    if "sessions" not in st.session_state:
+        st.session_state.sessions = [
+            {
+                "id":          1,
+                "name":       "CS50 Lecture 1",
+                "course":     "CS50",
+                "status":     "active",
+                "start_time": "01-03-2026 10:00",
+                "end_time":   "01-03-2026 12:00"
+            },
 
-        {
-            "id":          2,
-            "name":       "CS50 Seminar 1",
-            "course":     "CS50",
-            "status":     "inactive",
-            "start_time": "2026-01-01 14:00",
-            "end_time":   "2026-01-01 16:00"
-        },
+            {
+                "id":          2,
+                "name":       "CS50 Seminar 1",
+                "course":     "CS50",
+                "status":     "inactive",
+                "start_time": "01-01-2026 14:00",
+                "end_time":   "01-01-2026 16:00"
+            },
 
-        {
-            "id":          3,
-            "name":       "CS88 Lecture 3",
-            "course":     "CS88",
-            "status":     "active",
-            "start_time": "2026-03-01 10:00",
-            "end_time":   "2026-03-01 12:00"
-        }
-    ]
+            {
+                "id":          3,
+                "name":       "CS88 Lecture 3",
+                "course":     "CS88",
+                "status":     "active",
+                "start_time": "01-03-2026 10:00",
+                "end_time":   "01-03-2026 12:00"
+            }
+        ]
+    sessions = st.session_state.sessions
 
     st.subheader("ALL SESSIONS")
 
@@ -227,6 +229,132 @@ elif page == "SESSIONS":
         st.write(f"**STATUS:** {selected_session['status']}")
         st.write(f"**START:** {selected_session['start_time']}")
         st.write(f"**END:** {selected_session['end_time']}")
+
+
+    st.subheader("SESSION CHECK-INS")
+
+    # TODO - temp mock data
+    # TODO - replace with st.session_state.api.get_session_checkins(selected_session_id) once mod 2 up and running
+
+    # DICT with the key being the session ID
+    mock_checkins = {
+
+        1: [
+                {
+                    "student_id":          "S001",
+                    "student_name":        "Alice Tan",
+                    "timestamp":           "10-10-2026 10:00",
+                    "verification_status": "success",
+                    "risk_score":           0.10
+                },
+
+                {
+                    "student_id":          "S002",
+                    "student_name":        "Benny Lim",
+                    "timestamp":           "10-10-2026 10:32",
+                    "verification_status": "success",
+                    "risk_score": 0.08
+                },
+
+                {
+                    "student_id":          "S003",
+                    "student_name":        "James Tay",
+                    "timestamp":           "10-10-2026 10:28",
+                    "verification_status": "flagged",
+                    "risk_score": 0.80
+                }
+        ],
+
+
+        2: [
+                {
+                    "student_id":          "S004",
+                    "student_name":        "Sarah Lim",
+                    "timestamp":           "10-10-2026 14:30",
+                    "verification_status": "success",
+                    "risk_score":           0.10
+                }
+        ],
+
+        3: []
+    }
+
+    # e.g. suppose you select 'CS50 Lecture 1' whose ID is 1 --- becomes 'mock_checkins.get(1, [])'
+    session_checkins = mock_checkins.get(
+        selected_session_id,
+        []
+    )
+
+    if session_checkins:
+        st.dataframe(
+            session_checkins,
+            use_container_width = True
+        )
+    else:
+        st.info("no checkins found for this session")  # this is if module 2 gives us an empty list or session
+
+
+
+    st.divider()
+    st.subheader("CREATE NEW SESSION")
+
+    with st.form("create_session_form"):
+        session_name = st.text_input("SESSION NAME")
+        course_id = st.text_input("COURSE ID")
+
+        start_time = st.text_input(
+            "START TIME",
+            placeholder = "DD-MM-YYYY HH:MM"
+        )
+
+        end_time = st.text_input(
+            "END TIME",
+            placeholder = "DD-MM-YYYY HH:MM"
+        )
+
+        st.write("GEOFENCE CONFIGURATION")  # For the geographical boundary of the session
+
+        latitude = st.number_input(
+            "LATITUDE",
+            value = 1.3521,  # TODO - hardcoded temp value - remove once mod 2 up and running
+            format = "%.6f"
+        )
+
+        longitude = st.number_input(
+            "LONGITUDE",
+            value = 103.8198,
+            format = "%.6f"
+        )
+
+        radius = st.number_input(
+            "RADIUS (METRES)",
+            min_value = 1,  # cannot enter 0 or a negative number
+            value = 100
+        )
+
+        create_button = st.form_submit_button("CREATE SESSION")
+
+        if create_button:
+            if not session_name or not course_id:
+                st.error("session name and course id are required")
+            else:
+                new_session = {
+                    "id":         len(st.session_state.sessions) + 1,
+                    "name":       session_name,
+                    "course":  course_id,
+                    "status":     "active",
+                    "start_time": start_time,
+                    "end_time":   end_time,
+                    "geofence": {
+                        "latitude":  latitude,
+                        "longitude": longitude,
+                        "radius":    radius
+                    }
+                }
+
+                st.session_state.sessions.append(new_session)
+                st.success("session form completed")
+                st.rerun()
 
 
 elif page == "CHECK-INS":
