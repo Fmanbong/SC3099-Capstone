@@ -70,6 +70,36 @@ if st.sidebar.button("LOGOUT"):
     st.rerun()
 
 
+if "sessions" not in st.session_state:  # TODO - this is mock data .. remove once mod 2 is up and running
+    st.session_state.sessions = [
+        {
+            "id":          1,
+            "name":       "CS50 Lecture 1",
+            "course":     "CS50",
+            "status":     "active",
+            "start_time": "01-03-2026 10:00",
+            "end_time":   "01-03-2026 12:00"
+        },
+     {
+            "id":          2,
+            "name":       "CS50 Seminar 1",
+            "course":     "CS50",
+            "status":     "inactive",
+            "start_time": "01-01-2026 14:00",
+            "end_time":   "01-01-2026 16:00"
+        },
+     {
+            "id":          3,
+            "name":       "CS88 Lecture 3",
+            "course":     "CS88",
+            "status":     "active",
+            "start_time": "01-03-2026 10:00",
+            "end_time":   "01-03-2026 12:00"
+        }
+    ]
+sessions = st.session_state.sessions
+
+
 # pages
 if   page == "OVERVIEW":
     st.header("OVERVIEW")
@@ -160,37 +190,6 @@ elif page == "SESSIONS":
 
     # TODO - temporary mock data
     # TODO - replace with st.session_state.api.get_sessions() when mod 2 is running
-
-    if "sessions" not in st.session_state:
-        st.session_state.sessions = [
-            {
-                "id":          1,
-                "name":       "CS50 Lecture 1",
-                "course":     "CS50",
-                "status":     "active",
-                "start_time": "01-03-2026 10:00",
-                "end_time":   "01-03-2026 12:00"
-            },
-
-            {
-                "id":          2,
-                "name":       "CS50 Seminar 1",
-                "course":     "CS50",
-                "status":     "inactive",
-                "start_time": "01-01-2026 14:00",
-                "end_time":   "01-01-2026 16:00"
-            },
-
-            {
-                "id":          3,
-                "name":       "CS88 Lecture 3",
-                "course":     "CS88",
-                "status":     "active",
-                "start_time": "01-03-2026 10:00",
-                "end_time":   "01-03-2026 12:00"
-            }
-        ]
-    sessions = st.session_state.sessions
 
     st.subheader("ALL SESSIONS")
 
@@ -358,8 +357,176 @@ elif page == "SESSIONS":
 
 
 elif page == "CHECK-INS":
-    st.header("check-ins")
-    st.write("TODO - check-ins monitoring goes here")
+    st.header("CHECK-INS")
+
+    # TODO - temp mock data
+    # TODO - replace with st.session_state.api.get_checkins() when mod 2 is running
+
+    every_checkin = [
+        {
+            "checkin_id":          "C001",
+            "student_id":          "S001",
+            "student_name":        "Alice Tan",
+            "session_id":           1,
+            "timestamp":           "10-10-2026 10:00",
+            "verification_status": "success",
+            "risk_score":           0.10,
+            "liveness_score":       0.95,
+            "face_match_score":     0.95,
+            "latitude":             1.3521,
+            "longitude":            103.8198
+        },
+
+        {
+            "checkin_id":          "C002",
+            "student_id":          "S002",
+            "student_name":        "Benny Lim",
+            "session_id":           1,
+            "timestamp":           "10-10-2026 10:30",
+            "verification_status": "success",
+            "risk_score":           0.08,
+            "liveness_score":       0.90,
+            "face_match_score":     0.90,
+            "latitude":             1.3333,
+            "longitude":            102.8196
+        },
+
+        {
+            "checkin_id":          "C003",
+            "student_id":          "S003",
+            "student_name":        "James Tay",
+            "session_id":           1,
+            "timestamp":           "10-10-2026 11:00",
+            "verification_status": "flagged",
+            "risk_score":           0.90,
+            "liveness_score":       0.60,
+            "face_match_score":     0.70,
+            "latitude":             1.3500,
+            "longitude":            103.8100
+        },
+    ]
+
+    st.subheader("FILTERS")
+
+    col1 , col2 = st.columns(2)
+
+    with col1:
+        session_filter = st.selectbox(
+            "SESSION",
+            ["ALL"] + [
+                f"{session['id']} - {session['name']}"
+                for session in sessions
+            ]
+        )
+
+    with col2:
+        status_filter = st.selectbox(
+            "VERFICATION STATUS",
+            ["ALL" , "success" , "flagged"]
+        )
+
+    filtered_checkins = every_checkin
+
+    if session_filter != "ALL":
+        selected_filter_session_id = int(session_filter.split(" - ")[0])
+
+        filtered_checkins = [
+            checkin
+            for checkin in filtered_checkins
+            if checkin["session_id"] == selected_filter_session_id
+        ]
+
+    if status_filter != "ALL":
+        filtered_checkins = [
+            checkin
+            for checkin in filtered_checkins
+            if checkin["verification_status"] == status_filter
+        ]
+
+    st.subheader("CHECK-IN RECORDS")
+
+    if filtered_checkins:  # only run this code if anything survived our filters
+        st.dataframe(
+            filtered_checkins,
+            use_container_width = True
+        )
+    else:
+        st.info("no checkins match the selected filters")
+
+    if filtered_checkins:
+        st.divider()
+
+        st.subheader("CHECK-IN DETAILS")
+
+        checkin_options = {
+            checkin["checkin_id"]: checkin
+            for checkin in filtered_checkins
+        }
+
+        selected_checkin_id = st.selectbox(
+            "SELECT CHECK-IN",
+            options = list(checkin_options.keys()),
+            format_func = lambda checkin_id: (
+                f"{checkin_id} - "
+                f"{checkin_options[checkin_id]['student_name']}"
+            )
+        )
+
+        selected_checkin = checkin_options[selected_checkin_id]
+
+        # NOTE - this is just temp data so I just added a few fields , you can add more such as the student name , timestamp , etc
+        st.write(
+            f"**STUDENT ID:** {selected_checkin['student_id']}"
+        )
+
+        st.write(
+            f"**CHECKIN ID:** {selected_checkin['checkin_id']}"
+        )
+
+        st.write(
+            f"**VERIFICATION STATUS:** "
+            f"{selected_checkin['verification_status']}"
+        )
+
+        st.subheader("VERIFICATION SIGNALS")
+
+        col1 , col2 , col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                "RISK SCORE",
+                f"{selected_checkin['risk_score']:.2f}"
+
+            )
+
+        with col2:
+            st.metric(
+                "LIVENESS SCORE",
+                f"{selected_checkin['liveness_score']:.2f}"
+
+            )
+
+        with col3:
+            st.metric(
+                "FACE MATCH SCORE",
+                f"{selected_checkin['face_match_score']:.2f}"
+
+            )
+
+        st.subheader("GPS LOCATION")
+
+        col1 , col2 = st.columns(2)
+
+        with col1:
+            st.write(
+                f"**LATITUDE:** {selected_checkin['latitude']}"
+            )
+
+        with col2:
+            st.write(
+                f"**LONGITUDE:** {selected_checkin['longitude']}"
+            )
+
 
 elif page == "AUDIT LOGS":
     st.header("audit logs")
