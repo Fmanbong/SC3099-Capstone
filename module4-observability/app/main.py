@@ -3,6 +3,21 @@ SAIV INSTRUCTOR DASHBOARD
 
 Students must implement the instructor dashboard with session management,
 attendance monitoring , and metrics visualisation
+
+TODOS
+- audit log color coded by severity
+- overview check-ins by hour chart
+- overview verification status pie chart
+
+- MODULE 2 INTEGRATION
+    > replace mock authentication with module 2 login
+    > replace mock sessions with API session data
+    > replace mock checkins with API checkin data
+    > replace mock audit logs with API audit logs
+    > replace mock metrics with Prometheus data
+    > connect session creation to module 2
+    > connect session update/delete to module 2
+    > ADD real-time check-in refresh
 """
 
 
@@ -14,7 +29,7 @@ from api_client import APIClient
 # page setup
 st.set_page_config(
     page_title = "SAIV INSTRUCTOR DASHBOARD",
-    page_icon  = "O..O", layout     = "wide",  # Layout == 'page elements use the entire screen width
+    page_icon  = "O..O", layout     = "wide",  # Layout == page elements use the entire screen width
 )
 
 BACKEND_URL    = os.getenv("BACKEND_URL",    "http://localhost:8000")  # environment vars
@@ -29,7 +44,7 @@ if "logged_in" not in st.session_state:
 
 st.title("SAIV INSTRUCTOR DASHBOARD")
 
-st.session_state.logged_in = True  # TODO - super important to remove this when mod 2 login feature up and running
+st.session_state.logged_in = True  # TODO - super important to remove this when mod 2 login feature up and running - this just helps us run our mock data currently
 
 if not st.session_state.logged_in:
     st.subheader("INSTRUCTOR LOGIN")
@@ -81,7 +96,8 @@ if "sessions" not in st.session_state:  # TODO - this is mock data .. remove onc
             "start_time": "01-03-2026 10:00",
             "end_time":   "01-03-2026 12:00"
         },
-     {
+
+        {
             "id":          2,
             "name":       "CS50 Seminar 1",
             "course":     "CS50",
@@ -89,7 +105,8 @@ if "sessions" not in st.session_state:  # TODO - this is mock data .. remove onc
             "start_time": "01-01-2026 14:00",
             "end_time":   "01-01-2026 16:00"
         },
-     {
+
+        {
             "id":          3,
             "name":       "CS88 Lecture 3",
             "course":     "CS88",
@@ -300,54 +317,11 @@ elif page == "SESSIONS":
     # TODO - temp mock data
     # TODO - replace with st.session_state.api.get_session_checkins(selected_session_id) once mod 2 up and running
 
-    # DICT with the key being the session ID
-    mock_checkins = {
-
-        1: [
-                {
-                    "student_id":          "S001",
-                    "student_name":        "Alice Tan",
-                    "timestamp":           "10-10-2026 10:00",
-                    "verification_status": "success",
-                    "risk_score":           0.10
-                },
-
-                {
-                    "student_id":          "S002",
-                    "student_name":        "Benny Lim",
-                    "timestamp":           "10-10-2026 10:32",
-                    "verification_status": "success",
-                    "risk_score": 0.08
-                },
-
-                {
-                    "student_id":          "S003",
-                    "student_name":        "James Tay",
-                    "timestamp":           "10-10-2026 10:28",
-                    "verification_status": "flagged",
-                    "risk_score": 0.80
-                }
-        ],
-
-
-        2: [
-                {
-                    "student_id":          "S004",
-                    "student_name":        "Sarah Lim",
-                    "timestamp":           "10-10-2026 14:30",
-                    "verification_status": "success",
-                    "risk_score":           0.10
-                }
-        ],
-
-        3: []
-    }
-
-    # e.g. suppose you select 'CS50 Lecture 1' whose ID is 1 --- becomes 'mock_checkins.get(1, [])'
-    session_checkins = mock_checkins.get(
-        selected_session_id,
-        []
-    )
+    session_checkins = [
+        checkin
+        for checkin in every_checkin
+        if checkin["session_id"] == selected_session_id
+    ]
 
     if session_checkins:
         st.dataframe(
@@ -743,73 +717,3 @@ elif page == "METRICS":
     health_col1.metric("BACKEND", backend_status)
     health_col2.metric("DATABASE", database_status)
     health_col3.metric("PROMETHEUS", prometheus_status)
-
-
-
-
-    st.write("TODO - metrics and system health goes here")
-
-
-
-# =============================================================================
-# TODO: Implement the following pages/features
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# Authentication
-# -----------------------------------------------------------------------------
-# - Login form for instructors
-# - JWT token management
-# - Session persistence
-
-# -----------------------------------------------------------------------------
-# Overview Page
-# -----------------------------------------------------------------------------
-# - Total sessions (active/inactive)
-# - Total check-ins & success rate
-# - Recent check-ins table
-# - Check-ins by hour chart
-# - Verification status pie chart
-
-# -----------------------------------------------------------------------------
-# Sessions Management
-# -----------------------------------------------------------------------------
-# - View all sessions with details
-# - Create new sessions with geofence config
-# - View check-ins per session
-# - CSV export for gradebook
-
-# -----------------------------------------------------------------------------
-# Check-ins View
-# -----------------------------------------------------------------------------
-# - Filter by session, verification status
-# - Real-time updates
-# - CSV export for gradebook integration
-# - Attendance data with all signals
-
-# -----------------------------------------------------------------------------
-# Audit Logs
-# -----------------------------------------------------------------------------
-# - Browse system events
-# - Filter by event type, user, action
-# - Color-coded by severity
-# - Export audit trail
-
-# -----------------------------------------------------------------------------
-# Metrics Dashboard
-# -----------------------------------------------------------------------------
-# - API response times (p95 latency)
-# - Request rates
-# - Success rates
-# - Risk score distribution
-# - High-risk alerts
-# - System health status
-
-# =============================================================================
-# CSV Export Format
-# =============================================================================
-# Required columns:
-# - Check-in ID, Student ID, Session ID
-# - Timestamp, Verification Status
-# - Risk Score, Liveness Score, Face Match Score
-# - GPS Coordinates (latitude, longitude)

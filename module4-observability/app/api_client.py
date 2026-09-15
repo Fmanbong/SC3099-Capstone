@@ -1,7 +1,6 @@
 
 """ commentary
 - ALL our HTTP details will stay inside here
-- AS of 11092026
     > the Login function has its own post request
     > the dedicated POST function is for other POST requests
 """
@@ -22,7 +21,6 @@ class APIClient:
 
         """ token parameter is the JWT returned by module 2 after login
         """
-
         self.token = token
 
 
