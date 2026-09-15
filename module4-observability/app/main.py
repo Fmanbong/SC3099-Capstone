@@ -7,6 +7,7 @@ attendance monitoring , and metrics visualisation
 
 
 import streamlit as st
+import pandas as pd
 import os
 from api_client import APIClient
 
@@ -98,6 +99,51 @@ if "sessions" not in st.session_state:  # TODO - this is mock data .. remove onc
         }
     ]
 sessions = st.session_state.sessions
+
+
+every_checkin = [
+    {
+        "checkin_id":          "C001",
+        "student_id":          "S001",
+        "student_name":        "Alice Tan",
+        "session_id":           1,
+        "timestamp":           "10-10-2026 10:00",
+        "verification_status": "success",
+        "risk_score":           0.10,
+        "liveness_score":       0.95,
+        "face_match_score":     0.95,
+        "latitude":             1.3521,
+        "longitude":            103.8198
+    },
+
+    {
+        "checkin_id":          "C002",
+        "student_id":          "S002",
+        "student_name":        "Benny Lim",
+        "session_id":           1,
+        "timestamp":           "10-10-2026 10:30",
+        "verification_status": "success",
+        "risk_score":           0.08,
+        "liveness_score":       0.90,
+        "face_match_score":     0.90,
+        "latitude":             1.3333,
+        "longitude":            102.8196
+    },
+
+    {
+        "checkin_id":          "C003",
+        "student_id":          "S003",
+        "student_name":        "James Tay",
+        "session_id":           1,
+        "timestamp":           "10-10-2026 11:00",
+        "verification_status": "flagged",
+        "risk_score":           0.90,
+        "liveness_score":       0.60,
+        "face_match_score":     0.70,
+        "latitude":             1.3500,
+        "longitude":            103.8100
+    },
+]
 
 
 # pages
@@ -228,6 +274,25 @@ elif page == "SESSIONS":
         st.write(f"**STATUS:** {selected_session['status']}")
         st.write(f"**START:** {selected_session['start_time']}")
         st.write(f"**END:** {selected_session['end_time']}")
+
+
+    st.subheader("SESSION EXPORT")
+
+    export_checkins = [
+        checkin
+        for checkin in every_checkin
+        if checkin["session_id"] == selected_session["id"]
+    ]
+
+    export_checkins_df = pd.DataFrame(export_checkins)
+    session_csv_data = export_checkins_df.to_csv(index=False)
+
+    st.download_button(
+        "DOWNLOAD SESSION CSV",
+        session_csv_data,
+        f"session_{selected_session['id']}_checkins.csv",
+        "text/csv"
+        )
 
 
     st.subheader("SESSION CHECK-INS")
@@ -362,50 +427,6 @@ elif page == "CHECK-INS":
     # TODO - temp mock data
     # TODO - replace with st.session_state.api.get_checkins() when mod 2 is running
 
-    every_checkin = [
-        {
-            "checkin_id":          "C001",
-            "student_id":          "S001",
-            "student_name":        "Alice Tan",
-            "session_id":           1,
-            "timestamp":           "10-10-2026 10:00",
-            "verification_status": "success",
-            "risk_score":           0.10,
-            "liveness_score":       0.95,
-            "face_match_score":     0.95,
-            "latitude":             1.3521,
-            "longitude":            103.8198
-        },
-
-        {
-            "checkin_id":          "C002",
-            "student_id":          "S002",
-            "student_name":        "Benny Lim",
-            "session_id":           1,
-            "timestamp":           "10-10-2026 10:30",
-            "verification_status": "success",
-            "risk_score":           0.08,
-            "liveness_score":       0.90,
-            "face_match_score":     0.90,
-            "latitude":             1.3333,
-            "longitude":            102.8196
-        },
-
-        {
-            "checkin_id":          "C003",
-            "student_id":          "S003",
-            "student_name":        "James Tay",
-            "session_id":           1,
-            "timestamp":           "10-10-2026 11:00",
-            "verification_status": "flagged",
-            "risk_score":           0.90,
-            "liveness_score":       0.60,
-            "face_match_score":     0.70,
-            "latitude":             1.3500,
-            "longitude":            103.8100
-        },
-    ]
-
     st.subheader("FILTERS")
 
     col1 , col2 = st.columns(2)
@@ -421,7 +442,7 @@ elif page == "CHECK-INS":
 
     with col2:
         status_filter = st.selectbox(
-            "VERFICATION STATUS",
+            "VERIFICATION STATUS",
             ["ALL" , "success" , "flagged"]
         )
 
@@ -452,6 +473,18 @@ elif page == "CHECK-INS":
         )
     else:
         st.info("no checkins match the selected filters")
+
+
+    checkins_df = pd.DataFrame(filtered_checkins)
+    csv_data = checkins_df.to_csv(index=False)  # False because I do not want pandas auto generated row numbers
+
+    st.download_button(
+        "DOWNLOAD CHECK-INS CSV",
+        csv_data,
+        "checkins.csv",
+        "text/csv"
+        )
+
 
     if filtered_checkins:
         st.divider()
@@ -529,11 +562,191 @@ elif page == "CHECK-INS":
 
 
 elif page == "AUDIT LOGS":
-    st.header("audit logs")
-    st.write("TODO - audit logs goes here")
+    st.header("AUDIT LOGS")
+
+    # TODO - temp mock data
+    # TODO - replace with st.session_state.api.get_audit_logs() when mod 2 running okay
+
+    audit_logs = [
+
+        {
+            "timestamp":  "2026-10-10 10:30:50",
+            "event_type": "CHECK-IN",
+            "user":       "S001",
+            "action":     "student checked in",
+            "severity":   "INFO",
+            "details":    "successful attendance verification"
+        },
+
+        {
+            "timestamp":  "2026-10-10 11:30:00",
+            "event_type": "LOGIN",
+            "user":       "I001",
+            "action":     "Instructor Login",
+            "severity":   "INFO",
+            "details":    "Instructor successful Login"
+        },
+
+        {
+            "timestamp":  "2026-10-10 09:50:50",
+            "event_type": "SYSTEM",
+            "user":       "system",
+            "action":     "backend connection failure",
+            "severity":   "ERROR",
+            "details":    "unable to connect to module 2 backend"
+        }
+    ]
+
+    st.subheader("FILTERS")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        event_types  = ["ALL"] + sorted(
+            set(log["event_type"] for log in audit_logs)  # the usage of set() here is just to remove duplicates
+            )
+        event_filter = st.selectbox(
+            "EVENT TYPE",
+            event_types
+            )
+
+
+    with col2:
+        users = ["ALL"] + sorted(
+            set(log["user"] for log in audit_logs)
+        )
+
+        user_filter = st.selectbox(
+            "USER",
+            users
+        )
+
+
+    with col3:
+        actions = ["ALL"] + sorted(
+            set(log["action"] for log in audit_logs)
+        )
+
+        action_filter = st.selectbox(
+            "ACTION",
+            actions
+        )
+
+    filtered_logs = audit_logs
+
+    if event_filter  != "ALL":
+        filtered_logs = [
+            log
+            for log in filtered_logs
+            if log["event_type"] == event_filter
+        ]
+
+    if user_filter   != "ALL":
+        filtered_logs = [
+            log
+            for log in filtered_logs
+            if log["user"] == user_filter
+        ]
+
+    if action_filter != "ALL":
+        filtered_logs = [
+            log
+            for log in filtered_logs
+            if log["action"] == action_filter
+        ]
+
+    # ^^^ Take whatever survived the prev filter and filter it again
+
+    st.subheader("AUDIT EVENTS")
+
+    if filtered_logs:
+        st.dataframe(
+            filtered_logs,
+            use_container_width = True
+            )
+    else:
+        st.info("no audit events match the selected filters")
+
+    audit_logs_df = pd.DataFrame(filtered_logs)
+    audit_csv_data = audit_logs_df.to_csv(index=False)
+
+    st.download_button(
+        "DOWNLOAD AUDIT LOGS CSV",
+        audit_csv_data,
+        "audit_logs.csv",
+        "text/csv"
+        )
+
 
 elif page == "METRICS":
-    st.header("metrics")
+    st.header("SYSTEM METRICS")
+
+    api_requests = 1248
+    api_success_rate = 98.8
+    api_error_rate = 1.3
+
+    col1 , col2 , col3 = st.columns(3)
+
+    col1.metric("API REQUESTS", api_requests)
+    col2.metric("SUCCESS RATE", f"{api_success_rate}%")
+    col3.metric("ERROR RATE",   f"{api_error_rate}%")
+
+    api_response_p95 = 245  # rmb this is mock data but this is suppose to simulate a 95TH percentile API response time
+
+    st.metric("API RESPONSE P95", f"{api_response_p95} ms")
+
+
+    st.subheader("RISK SCORE DISTRIBUTION")
+
+    risk_distribution = {
+        "LOW": 72,
+        "MEDIUM": 18,
+        "HIGH": 10
+    }
+
+    st.bar_chart(risk_distribution)
+
+
+    st.subheader("HIGH-RISK ALERTS")
+
+    high_risk_alerts = [
+        {
+            "checkin_id": "C003",
+            "student_id": "S103",
+            "risk_score":  0.90,
+            "reason":     "low face match score"
+        },
+
+        {
+            "checkin_id": "C004",
+            "student_id": "S104",
+            "risk_score":  0.85,
+            "reason":     "low liveness score"
+        }
+    ]
+
+    if high_risk_alerts:
+        st.dataframe(high_risk_alerts, use_container_width=True)
+    else:
+        st.info("no high-risk alerts")
+
+
+    st.subheader("SYSTEM HEALTH")
+
+    backend_status    = "HEALTHY"  # TODO - rmb these are temp / mock values
+    database_status   = "HEALTHY"  # TODO - rmb these are temp / mock values
+    prometheus_status = "HEALTHY"  # TODO - rmb these are temp / mock values
+
+    health_col1 , health_col2 , health_col3 = st.columns(3)
+
+
+    health_col1.metric("BACKEND", backend_status)
+    health_col2.metric("DATABASE", database_status)
+    health_col3.metric("PROMETHEUS", prometheus_status)
+
+
+
+
     st.write("TODO - metrics and system health goes here")
 
 
