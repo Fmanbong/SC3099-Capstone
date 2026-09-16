@@ -23,6 +23,7 @@ TODOS
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import os
 from api_client import APIClient
 
@@ -138,7 +139,7 @@ every_checkin = [
         "student_id":          "S002",
         "student_name":        "Benny Lim",
         "session_id":           1,
-        "timestamp":           "10-10-2026 10:30",
+        "timestamp":           "10-10-2026 12:30",
         "verification_status": "success",
         "risk_score":           0.08,
         "liveness_score":       0.90,
@@ -152,7 +153,7 @@ every_checkin = [
         "student_id":          "S003",
         "student_name":        "James Tay",
         "session_id":           1,
-        "timestamp":           "10-10-2026 11:00",
+        "timestamp":           "10-10-2026 16:00",
         "verification_status": "flagged",
         "risk_score":           0.90,
         "liveness_score":       0.60,
@@ -210,6 +211,32 @@ if   page == "OVERVIEW":
             )
 
 
+        verification_counts = {}
+
+        for checkin in every_checkin:
+            status = checkin["verification_status"]
+
+            if status not in verification_counts:
+                verification_counts[status] = 0
+            verification_counts[status] += 1
+
+        verification_df = pd.DataFrame(
+            list(verification_counts.items()),
+            columns = ["verification_status", "count"]
+        )
+
+        st.subheader("VERIFICATION STATUS")
+
+        st.plotly_chart(
+            px.pie(
+                verification_df,
+                names = "verification_status",
+                values = "count"
+                ),
+            use_container_width = True
+        )
+
+
         st.subheader("RECENT CHECK-INS")
 
         recent_checkins = [
@@ -240,6 +267,44 @@ if   page == "OVERVIEW":
         st.dataframe(
             recent_checkins,
             use_container_width = True  # makes the table use the available width of the page
+        )
+
+
+        hour_counts = {}
+
+        for checkin in every_checkin:
+            timestamp = pd.to_datetime(
+                checkin["timestamp"],
+                format = "%d-%m-%Y %H:%M"
+            )
+
+            hour = timestamp.hour
+
+            if hour not in hour_counts:
+                hour_counts[hour] = 0
+
+            hour_counts[hour] += 1
+
+        hour_df = pd.DataFrame(
+            list(hour_counts.items()),
+            columns = ["hour", "checkins"]
+        )
+
+        hour_df = hour_df.sort_values("hour")
+
+        st.subheader("CHECK-INS BY HOUR")
+
+        st.plotly_chart(
+            px.bar(
+                hour_df,
+                x = "hour",
+                y = "checkins",
+                labels = {
+                    "hour" : "Hour",
+                    "checkins": "Check-ins"
+                }
+            ),
+            use_container_width = True
         )
 
 
@@ -633,13 +698,19 @@ elif page == "AUDIT LOGS":
 
     st.subheader("AUDIT EVENTS")
 
-    if filtered_logs:
-        st.dataframe(
-            filtered_logs,
-            use_container_width = True
-            )
-    else:
-        st.info("no audit events match the selected filters")
+
+    def color_severity(row):
+        if row["severity"] == "ERROR":
+            return ["background-color: #FF0000"] * len(row)
+
+        if row["severity"] == "WARNING":
+            return ["background-color: #FFA500"] * len(row)
+
+        if row["severity"] == "INFO":
+            return ["background-color: #0000FF"] * len(row)
+
+        return [""] * len(row)  # this is for if we somehow encounter another severity not specified , no color
+
 
     audit_logs_df = pd.DataFrame(filtered_logs)
     audit_csv_data = audit_logs_df.to_csv(index=False)
@@ -650,6 +721,20 @@ elif page == "AUDIT LOGS":
         "audit_logs.csv",
         "text/csv"
         )
+
+    colored_audit_logs = audit_logs_df.style.apply(
+        color_severity,
+        axis = 1  # this is too apply the function row by row
+    )
+
+    if filtered_logs:
+        st.dataframe(
+            colored_audit_logs,
+            use_container_width = True
+            )
+    else:
+        st.info("no audit events match the selected filters")
+
 
 
 elif page == "METRICS":
