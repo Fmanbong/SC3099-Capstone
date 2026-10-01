@@ -17,32 +17,38 @@ export default function CameraCapture({
   countdownSeconds = 3,
 }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [stream, setStream] = useState<MediaStream | null>(null)
+  const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null)
 
+  // The camera runs only while the live view is on screen: it is released as
+  // soon as a frame is captured (or the component unmounts) and re-acquired
+  // on Retake, when a fresh <video> element is mounted.
   useEffect(() => {
+    if (capturedPreview) return
+
     let active = true
+    let stream: MediaStream | null = null
     requestCameraStream()
       .then((s) => {
         if (!active) {
           stopStream(s)
           return
         }
-        setStream(s)
+        stream = s
         if (videoRef.current) videoRef.current.srcObject = s
       })
-      .catch((err: CameraError) => setError(err.message))
+      .catch((err) =>
+        setError(err instanceof CameraError ? err.message : 'Could not start the camera.')
+      )
 
     return () => {
       active = false
-      setStream((s) => {
-        stopStream(s)
-        return null
-      })
+      stopStream(stream)
+      setReady(false)
     }
-  }, [])
+  }, [capturedPreview])
 
   const doCapture = useCallback(() => {
     if (!videoRef.current) return
@@ -102,6 +108,7 @@ export default function CameraCapture({
           autoPlay
           playsInline
           muted
+          onLoadedMetadata={() => setReady(true)}
           className="rounded w-full max-w-xs mx-auto -scale-x-100"
         />
         {countdown !== null && countdown > 0 && (
@@ -113,7 +120,7 @@ export default function CameraCapture({
       <button
         type="button"
         onClick={startCountdown}
-        disabled={!stream || countdown !== null}
+        disabled={!ready || countdown !== null}
         className="bg-blue-700 text-white px-4 py-2 rounded disabled:opacity-50"
       >
         {countdown !== null ? 'Capturing...' : 'Capture Photo'}

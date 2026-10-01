@@ -5,7 +5,8 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import Alert from '@/components/Alert'
 import { useAuth } from '@/lib/auth-context'
 import { api, extractErrorMessage } from '@/lib/api'
-import type { Device } from '@/lib/types'
+import { displayText } from '@/lib/text'
+import type { Device, User } from '@/lib/types'
 
 function ConsentToggle({
   label,
@@ -51,7 +52,7 @@ function DeviceList() {
       {devices.map((d) => (
         <li key={d.id} className="border rounded p-3 text-sm flex justify-between items-center">
           <div>
-            <p className="font-medium">{d.device_name}</p>
+            <p className="font-medium">{displayText(d.device_name)}</p>
             <p className="text-xs text-gray-500">
               {d.platform} · {d.total_checkins ?? 0} check-ins
             </p>
@@ -82,8 +83,10 @@ function ProfileContent() {
     setError(null)
     setSaved(false)
     try {
-      await api.put('/users/me', { [field]: value })
-      updateUser({ [field]: value })
+      // Use the server's copy: withdrawing camera consent also deletes the
+      // face enrollment there, which a single-field local patch would miss.
+      const res = await api.put<User>('/users/me', { [field]: value })
+      updateUser(res.data)
       setSaved(true)
     } catch (err) {
       setError(extractErrorMessage(err))
@@ -96,7 +99,7 @@ function ProfileContent() {
     <div className="space-y-5">
       <div className="bg-white border rounded-lg p-4">
         <h2 className="font-semibold mb-2">Account</h2>
-        <p className="text-sm">{user.full_name}</p>
+        <p className="text-sm">{displayText(user.full_name)}</p>
         <p className="text-sm text-gray-500">{user.email}</p>
         <p className="text-xs text-gray-400 capitalize mt-1">{user.role}</p>
         <p className="text-xs mt-2">
@@ -124,7 +127,8 @@ function ProfileContent() {
         {saving && <p className="text-xs text-gray-400 mt-1">Saving...</p>}
         <p className="text-xs text-gray-400 mt-2">
           Both must be enabled to check in. You can withdraw consent at any time, but you
-          won&apos;t be able to check in until it&apos;s re-enabled.
+          won&apos;t be able to check in until it&apos;s re-enabled. Turning off camera access
+          also deletes your face enrollment.
         </p>
       </div>
 

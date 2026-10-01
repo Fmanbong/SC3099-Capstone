@@ -26,7 +26,7 @@ interface AuthContextValue {
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, fullName: string, role?: Role) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   refreshUser: () => Promise<void>
   updateUser: (partial: Partial<User>) => void
 }
@@ -38,7 +38,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Revoke the login session on the server before dropping the tokens, so
+    // they stop working everywhere. Awaited (not fire-and-forget) because the
+    // request needs the tokens that clearTokens() removes; signing out locally
+    // must still succeed if the server cannot be reached.
+    try {
+      await api.post('/auth/logout', undefined, { timeout: 5000 })
+    } catch {
+      // Already expired/revoked, or offline.
+    }
     clearTokens()
     setUser(null)
     router.push('/login')

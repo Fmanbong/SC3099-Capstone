@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { displayText } from '@/lib/text'
 
 const links = [
   { href: '/checkin', label: 'Check In' },
@@ -33,7 +34,7 @@ export default function Navbar() {
           ))}
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <span className="opacity-90">{user?.full_name}</span>
+          <span className="opacity-90">{displayText(user?.full_name)}</span>
           <button onClick={logout} className="bg-blue-900 px-3 py-1 rounded hover:bg-blue-800">
             Logout
           </button>

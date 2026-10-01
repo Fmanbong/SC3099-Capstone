@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import ConsentPrompt from '@/components/ConsentPrompt'
 import CameraCapture from '@/components/CameraCapture'
@@ -8,9 +9,9 @@ import Alert from '@/components/Alert'
 import { useAuth } from '@/lib/auth-context'
 import { api, extractErrorMessage } from '@/lib/api'
 import { getCurrentPosition, GeolocationError, type GeoResult } from '@/lib/geolocation'
-import { getDeviceFingerprint, getOrCreateDeviceKeyPair, detectPlatform } from '@/lib/device'
-import { queueCheckin } from '@/lib/offline-queue'
-import type { CheckinResult, Session } from '@/lib/types'
+import { createDeviceProof, getDeviceIdentity } from '@/lib/device'
+import { displayText } from '@/lib/text'
+import type { CheckinHistoryItem, CheckinResult, Enrollment, Session } from '@/lib/types'
 
 type Step =
   | 'loading'
@@ -77,23 +78,35 @@ function ResultCard({ result, onDone }: { result: CheckinResult; onDone: () => v
 }
 
 function CheckinFlow() {
-  const { user, updateUser } = useAuth()
+  const { user, updateUser, refreshUser } = useAuth()
   const [step, setStep] = useState<Step>('loading')
   const [sessions, setSessions] = useState<Session[]>([])
+  const [checkedInSessionIds, setCheckedInSessionIds] = useState<Set<string>>(new Set())
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [location, setLocation] = useState<GeoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<CheckinResult | null>(null)
   const [grantingConsent, setGrantingConsent] = useState(false)
-  const [offlineNotice, setOfflineNotice] = useState(false)
+  const [faceEnrollmentNeeded, setFaceEnrollmentNeeded] = useState(false)
 
   const loadSessions = useCallback(async () => {
     setStep('loading')
     setError(null)
+    setFaceEnrollmentNeeded(false)
     try {
-      const res = await api.get<Session[]>('/sessions/active')
-      setSessions(res.data)
+      // /sessions/active lists every open session in the system, so it is
+      // narrowed to the student's own courses. The two extra lookups are
+      // optional: if either fails, the list is shown unfiltered and the
+      // backend still enforces enrollment and duplicates on submit.
+      const [active, enrollments, history] = await Promise.all([
+        api.get<Session[]>('/sessions/active'),
+        api.get<Enrollment[]>('/enrollments/my-enrollments').catch(() => null),
+        api.get<CheckinHistoryItem[]>('/checkins/my-checkins').catch(() => null),
+      ])
+      const courseIds = enrollments ? new Set(enrollments.data.map((e) => e.course_id)) : null
+      setSessions(courseIds ? active.data.filter((s) => courseIds.has(s.course_id)) : active.data)
+      setCheckedInSessionIds(new Set(history?.data.map((c) => c.session_id) ?? []))
       setStep('select')
     } catch (err) {
       setError(extractErrorMessage(err))
@@ -103,28 +116,18 @@ function CheckinFlow() {
 
   useEffect(() => {
     loadSessions()
-    // Best-effort device registration; failures shouldn't block check-in.
-    ;(async () => {
-      try {
-        const [fingerprint, keyPair] = await Promise.all([
-          getDeviceFingerprint(),
-          getOrCreateDeviceKeyPair(),
-        ])
-        await api.post('/devices/register', {
-          device_fingerprint: fingerprint,
-          device_name: `${detectPlatform()} browser`,
-          platform: detectPlatform(),
-          public_key: keyPair.publicKeyPem,
-        })
-      } catch {
-        // Device may already be registered, or endpoint may reject duplicates - ignore.
-      }
-    })()
-  }, [loadSessions])
+    // Consent and face enrollment may have changed on another device.
+    refreshUser()
+  }, [loadSessions, refreshUser])
 
   function selectSession(session: Session) {
-    setSelectedSession(session)
     setError(null)
+    if (session.require_face_match && !user?.face_enrolled) {
+      setFaceEnrollmentNeeded(true)
+      return
+    }
+    setFaceEnrollmentNeeded(false)
+    setSelectedSession(session)
     setStep(user?.camera_consent ? 'camera' : 'camera-consent')
   }
 
@@ -133,46 +136,31 @@ function CheckinFlow() {
     setStep('submitting')
     setError(null)
 
-    const fingerprint = await getDeviceFingerprint()
-    const payload = {
-      session_id: selectedSession.id,
-      latitude: geo.latitude,
-      longitude: geo.longitude,
-      location_accuracy_meters: geo.accuracy,
-      device_fingerprint: fingerprint,
-      liveness_challenge_response: image,
-    }
-
+    // Check-ins are only ever submitted live: the photo and location must be
+    // current, and the device proof below expires within minutes.
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      await queueCheckin(payload)
-      setOfflineNotice(true)
-      setStep('result')
-      setResult({
-        id: 'queued',
-        session_id: selectedSession.id,
-        status: 'pending',
-        checked_in_at: new Date().toISOString(),
-      })
+      setError("You're offline. Reconnect and try again - check-ins can't be saved for later.")
+      setStep('location')
       return
     }
 
     try {
-      const res = await api.post<CheckinResult>('/checkins/', payload)
+      const [identity, proof] = await Promise.all([
+        getDeviceIdentity(),
+        createDeviceProof(selectedSession.id),
+      ])
+      const res = await api.post<CheckinResult>('/checkins/', {
+        session_id: selectedSession.id,
+        latitude: geo.latitude,
+        longitude: geo.longitude,
+        location_accuracy_meters: geo.accuracy,
+        device_fingerprint: identity.fingerprint,
+        liveness_challenge_response: image,
+        ...(proof ?? {}),
+      })
       setResult(res.data)
       setStep('result')
     } catch (err) {
-      if (err instanceof Error && err.message === 'Network Error') {
-        await queueCheckin(payload)
-        setOfflineNotice(true)
-        setResult({
-          id: 'queued',
-          session_id: selectedSession.id,
-          status: 'pending',
-          checked_in_at: new Date().toISOString(),
-        })
-        setStep('result')
-        return
-      }
       setError(extractErrorMessage(err))
       setStep('location')
     }
@@ -200,9 +188,14 @@ function CheckinFlow() {
     setCapturedImage(null)
     setLocation(null)
     setResult(null)
-    setOfflineNotice(false)
     loadSessions()
   }
+
+  const backToSessions = (
+    <button onClick={reset} className="text-sm text-blue-700 underline block mx-auto">
+      Back to sessions
+    </button>
+  )
 
   if (step === 'loading') {
     return <p className="text-center text-gray-500">Loading sessions...</p>
@@ -212,28 +205,43 @@ function CheckinFlow() {
     return (
       <div className="space-y-3">
         {error && <Alert type="error">{error}</Alert>}
+        {faceEnrollmentNeeded && (
+          <Alert type="warning">
+            This session requires face verification.{' '}
+            <Link href="/enroll" className="underline font-medium">
+              Enroll your face
+            </Link>{' '}
+            first, then come back to check in.
+          </Alert>
+        )}
         <h2 className="font-semibold">Open Check-ins</h2>
         {sessions.length === 0 && (
           <p className="text-sm text-gray-500">
-            No sessions are open for check-in right now. Ask your instructor to activate the
-            session, then refresh.
+            No sessions in your courses are open for check-in right now. Ask your instructor to
+            activate the session, then refresh.
           </p>
         )}
         <ul className="space-y-2">
-          {sessions.map((session) => (
-            <li key={session.id}>
-              <button
-                onClick={() => selectSession(session)}
-                className="w-full text-left bg-white border rounded-lg p-4 hover:border-blue-500"
-              >
-                <p className="font-medium">{session.name}</p>
-                <p className="text-sm text-gray-500">
-                  {session.course_code} {session.venue_name ? `· ${session.venue_name}` : ''}
-                </p>
-                <p className="text-xs text-blue-700 mt-1">{timeRemaining(session.checkin_closes_at)}</p>
-              </button>
-            </li>
-          ))}
+          {sessions.map((session) => {
+            const checkedIn = checkedInSessionIds.has(session.id)
+            return (
+              <li key={session.id}>
+                <button
+                  onClick={() => selectSession(session)}
+                  disabled={checkedIn}
+                  className="w-full text-left bg-white border rounded-lg p-4 hover:border-blue-500 disabled:opacity-60 disabled:hover:border-gray-200"
+                >
+                  <p className="font-medium">{displayText(session.name)}</p>
+                  <p className="text-sm text-gray-500">
+                    {session.course_code} {session.venue_name ? `· ${session.venue_name}` : ''}
+                  </p>
+                  <p className="text-xs text-blue-700 mt-1">
+                    {checkedIn ? 'Already checked in' : timeRemaining(session.checkin_closes_at)}
+                  </p>
+                </button>
+              </li>
+            )
+          })}
         </ul>
         <button onClick={loadSessions} className="text-sm text-blue-700 underline">
           Refresh
@@ -244,23 +252,28 @@ function CheckinFlow() {
 
   if (step === 'camera-consent') {
     return (
-      <ConsentPrompt
-        title="Camera access needed"
-        description="We use your camera to confirm it's really you checking in. Your photo is analyzed and never stored."
-        granting={grantingConsent}
-        onGrant={async () => {
-          setGrantingConsent(true)
-          try {
-            await api.put('/users/me', { camera_consent: true })
-            updateUser({ camera_consent: true })
-            setStep('camera')
-          } catch (err) {
-            setError(extractErrorMessage(err))
-          } finally {
-            setGrantingConsent(false)
-          }
-        }}
-      />
+      <div className="space-y-3">
+        {error && <Alert type="error">{error}</Alert>}
+        <ConsentPrompt
+          title="Camera access needed"
+          description="We use your camera to confirm it's really you checking in. Your photo is analyzed and never stored."
+          granting={grantingConsent}
+          onGrant={async () => {
+            setGrantingConsent(true)
+            setError(null)
+            try {
+              await api.put('/users/me', { camera_consent: true })
+              updateUser({ camera_consent: true })
+              setStep('camera')
+            } catch (err) {
+              setError(extractErrorMessage(err))
+            } finally {
+              setGrantingConsent(false)
+            }
+          }}
+        />
+        {backToSessions}
+      </div>
     )
   }
 
@@ -268,7 +281,8 @@ function CheckinFlow() {
     return (
       <div className="space-y-3">
         <p className="text-sm text-gray-500">
-          Checking in to <span className="font-medium">{selectedSession?.name}</span>
+          Checking in to{' '}
+          <span className="font-medium">{displayText(selectedSession?.name)}</span>
         </p>
         <CameraCapture
           onCapture={(image) => {
@@ -280,29 +294,35 @@ function CheckinFlow() {
             }
           }}
         />
+        {backToSessions}
       </div>
     )
   }
 
   if (step === 'location-consent') {
     return (
-      <ConsentPrompt
-        title="Location access needed"
-        description="We check that you're within range of the venue. Your location is only used for this check-in."
-        granting={grantingConsent}
-        onGrant={async () => {
-          setGrantingConsent(true)
-          try {
-            await api.put('/users/me', { geolocation_consent: true })
-            updateUser({ geolocation_consent: true })
-            await requestLocationAndSubmit(capturedImage)
-          } catch (err) {
-            setError(extractErrorMessage(err))
-          } finally {
-            setGrantingConsent(false)
-          }
-        }}
-      />
+      <div className="space-y-3">
+        {error && <Alert type="error">{error}</Alert>}
+        <ConsentPrompt
+          title="Location access needed"
+          description="We check that you're within range of the venue. Your location is only used for this check-in."
+          granting={grantingConsent}
+          onGrant={async () => {
+            setGrantingConsent(true)
+            setError(null)
+            try {
+              await api.put('/users/me', { geolocation_consent: true })
+              updateUser({ geolocation_consent: true })
+              await requestLocationAndSubmit(capturedImage)
+            } catch (err) {
+              setError(extractErrorMessage(err))
+            } finally {
+              setGrantingConsent(false)
+            }
+          }}
+        />
+        {backToSessions}
+      </div>
     )
   }
 
@@ -315,29 +335,33 @@ function CheckinFlow() {
           {step === 'submitting' ? 'Submitting check-in...' : ''}
         </p>
         {error && (
-          <button
-            onClick={() => requestLocationAndSubmit(capturedImage)}
-            className="bg-blue-700 text-white px-4 py-2 rounded"
-          >
-            Try again
-          </button>
+          <>
+            <div className="flex justify-center gap-2 flex-wrap">
+              <button
+                onClick={() => requestLocationAndSubmit(capturedImage)}
+                className="bg-blue-700 text-white px-4 py-2 rounded"
+              >
+                Try again
+              </button>
+              <button
+                onClick={() => {
+                  setError(null)
+                  setStep('camera')
+                }}
+                className="border border-blue-700 text-blue-700 px-4 py-2 rounded"
+              >
+                Retake photo
+              </button>
+            </div>
+            {backToSessions}
+          </>
         )}
       </div>
     )
   }
 
   if (step === 'result' && result) {
-    return (
-      <div className="space-y-2">
-        {offlineNotice && (
-          <Alert type="warning">
-            You&apos;re offline. This check-in was saved and will be submitted automatically once
-            you&apos;re back online.
-          </Alert>
-        )}
-        <ResultCard result={result} onDone={reset} />
-      </div>
-    )
+    return <ResultCard result={result} onDone={reset} />
   }
 
   return null

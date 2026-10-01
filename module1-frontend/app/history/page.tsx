@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Alert from '@/components/Alert'
 import { api, extractErrorMessage } from '@/lib/api'
+import { displayText } from '@/lib/text'
 import type { CheckinHistoryItem } from '@/lib/types'
 
 const statusColor: Record<string, string> = {
@@ -65,7 +66,7 @@ function CheckinRow({ item, onAppealed }: { item: CheckinHistoryItem; onAppealed
     <li className="bg-white border rounded-lg p-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="font-medium">{item.session_name ?? item.session_id}</p>
+          <p className="font-medium">{displayText(item.session_name) || item.session_id}</p>
           <p className="text-xs text-gray-500">
             {item.course_code ? `${item.course_code} · ` : ''}
             {new Date(item.checked_in_at).toLocaleString()}

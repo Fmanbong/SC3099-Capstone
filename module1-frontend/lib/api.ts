@@ -72,6 +72,13 @@ api.interceptors.response.use(
   }
 )
 
+/** The backend's machine-readable error code (e.g. 'CHECKIN_EXISTS'), if it sent one. */
+export function extractErrorCode(err: unknown): string | undefined {
+  if (!axios.isAxiosError(err)) return undefined
+  const code = (err.response?.data as { code?: unknown } | undefined)?.code
+  return typeof code === 'string' ? code : undefined
+}
+
 export function extractErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const status = err.response?.status

@@ -87,6 +87,22 @@ export interface Device {
   total_checkins?: number
 }
 
+export interface DeviceChallenge {
+  id: string
+  device_id: string
+  session_id: string
+  nonce: string
+  expires_at: string
+}
+
+export interface Enrollment {
+  id: string
+  course_id: string
+  course_code?: string
+  course_name?: string
+}
+
 export interface ApiError {
   detail?: string | { loc: (string | number)[]; msg: string; type: string }[]
+  code?: string
 }

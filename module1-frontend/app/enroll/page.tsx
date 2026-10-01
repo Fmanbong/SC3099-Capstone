@@ -28,23 +28,26 @@ function EnrollFlow() {
 
   if (!user?.camera_consent) {
     return (
-      <ConsentPrompt
-        title="Camera access needed"
-        description="We use your camera to enroll your face so future check-ins can be verified as you. Your photo is processed to generate a one-way hash and is never stored."
-        granting={grantingConsent}
-        onGrant={async () => {
-          setGrantingConsent(true)
-          setError(null)
-          try {
-            await api.put('/users/me', { camera_consent: true })
-            updateUser({ camera_consent: true })
-          } catch (err) {
-            setError(extractErrorMessage(err))
-          } finally {
-            setGrantingConsent(false)
-          }
-        }}
-      />
+      <div className="space-y-3">
+        {error && <Alert type="error">{error}</Alert>}
+        <ConsentPrompt
+          title="Camera access needed"
+          description="We use your camera to enroll your face so future check-ins can be verified as you. Your photo is processed to generate a one-way hash and is never stored."
+          granting={grantingConsent}
+          onGrant={async () => {
+            setGrantingConsent(true)
+            setError(null)
+            try {
+              await api.put('/users/me', { camera_consent: true })
+              updateUser({ camera_consent: true })
+            } catch (err) {
+              setError(extractErrorMessage(err))
+            } finally {
+              setGrantingConsent(false)
+            }
+          }}
+        />
+      </div>
     )
   }
 
