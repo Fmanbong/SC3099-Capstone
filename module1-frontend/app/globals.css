@@ -1,3 +1,61 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+}
+
+/* Shared building blocks, so every page uses the same buttons, inputs and cards. */
+@layer components {
+  /* Page container for signed-in pages. The large bottom padding on phones
+     keeps content clear of the fixed tab bar (see Navbar). */
+  .page {
+    @apply mx-auto max-w-md space-y-5 px-4 pb-28 pt-6 sm:pb-10;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold tracking-tight;
+  }
+
+  .page-subtitle {
+    @apply mt-1 text-sm text-slate-500;
+  }
+
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-blue-700 text-white shadow-sm enabled:hover:bg-blue-800 enabled:active:bg-blue-900;
+  }
+
+  .btn-secondary {
+    @apply border border-slate-300 bg-white text-slate-700 enabled:hover:bg-slate-50 enabled:active:bg-slate-100;
+  }
+
+  .btn-ghost {
+    @apply text-blue-700 enabled:hover:bg-blue-50 enabled:active:bg-blue-100;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium text-slate-700;
+  }
+
+  .field-input {
+    @apply block w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-slate-900 shadow-sm transition-colors placeholder:text-slate-400;
+    @apply focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium capitalize;
+  }
+}

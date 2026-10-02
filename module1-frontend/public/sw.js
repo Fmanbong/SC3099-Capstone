@@ -10,7 +10,7 @@
  * Auth responses and check-in submissions must always be real-time -
  * caching them would let a stale token or a stale "success" be replayed.
  */
-const CACHE_NAME = 'saiv-shell-v1'
+const CACHE_NAME = 'saiv-shell-v2'
 const APP_SHELL = ['/', '/manifest.json', '/icon.svg']
 
 self.addEventListener('install', (event) => {

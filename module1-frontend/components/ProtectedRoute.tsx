@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { LoadingState } from './Spinner'
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth()
@@ -16,8 +17,8 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
 
   if (loading || !isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-500">
-        Loading...
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <LoadingState>Loading...</LoadingState>
       </div>
     )
   }

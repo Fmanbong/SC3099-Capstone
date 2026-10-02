@@ -1,8 +1,12 @@
+import Spinner from './Spinner'
+
 interface ConsentPromptProps {
   title: string
   description: string
   onGrant: () => void
   granting?: boolean
+  /** Icon shown above the title, e.g. a camera or map pin. */
+  icon?: React.ReactNode
 }
 
 /**
@@ -11,17 +15,31 @@ interface ConsentPromptProps {
  * on the backend (camera_consent / geolocation_consent) before the
  * corresponding browser API is invoked.
  */
-export default function ConsentPrompt({ title, description, onGrant, granting }: ConsentPromptProps) {
+export default function ConsentPrompt({
+  title,
+  description,
+  onGrant,
+  granting,
+  icon,
+}: ConsentPromptProps) {
   return (
-    <div className="bg-white border rounded-lg p-5 text-center space-y-3">
-      <h3 className="font-semibold text-lg">{title}</h3>
-      <p className="text-sm text-gray-600">{description}</p>
+    <div className="card space-y-4 p-6 text-center">
+      {icon && (
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-700">
+          {icon}
+        </div>
+      )}
+      <div className="space-y-1.5">
+        <h3 className="text-lg font-semibold">{title}</h3>
+        <p className="text-sm leading-relaxed text-slate-600">{description}</p>
+      </div>
       <button
         type="button"
         onClick={onGrant}
         disabled={granting}
-        className="bg-blue-700 text-white px-4 py-2 rounded disabled:opacity-50"
+        className="btn btn-primary w-full"
       >
+        {granting && <Spinner />}
         {granting ? 'Please wait...' : 'Allow'}
       </button>
     </div>

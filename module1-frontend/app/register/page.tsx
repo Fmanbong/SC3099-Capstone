@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import Alert from '@/components/Alert'
+import AuthShell from '@/components/AuthShell'
+import Spinner from '@/components/Spinner'
 
 export default function RegisterPage() {
   const { register } = useAuth()
@@ -39,75 +41,71 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-white rounded-lg shadow p-6 space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold">Create account</h1>
-          <p className="text-gray-500 text-sm">Register as a student</p>
-        </div>
-
-        {error && <Alert type="error">{error}</Alert>}
-        {success && <Alert type="success">Account created! Redirecting to sign in...</Alert>}
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="fullName">
-              Full Name
-            </label>
-            <input
-              id="fullName"
-              required
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              minLength={8}
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-            <p className="text-xs text-gray-500 mt-1">Minimum 8 characters.</p>
-          </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full bg-blue-700 text-white py-2 rounded font-medium disabled:opacity-50"
-          >
-            {submitting ? 'Creating account...' : 'Register'}
-          </button>
-        </form>
-
-        <p className="text-sm text-center text-gray-600">
+    <AuthShell
+      title="Create account"
+      subtitle="Register as a student"
+      footer={
+        <>
           Already have an account?{' '}
-          <Link href="/login" className="text-blue-700 underline">
+          <Link href="/login" className="font-semibold text-blue-700 hover:underline">
             Sign in
           </Link>
-        </p>
-      </div>
-    </main>
+        </>
+      }
+    >
+      {error && <Alert type="error">{error}</Alert>}
+      {success && <Alert type="success">Account created! Redirecting to sign in...</Alert>}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="field-label" htmlFor="fullName">
+            Full Name
+          </label>
+          <input
+            id="fullName"
+            required
+            autoComplete="name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            className="field-input"
+          />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="email">
+            Email
+          </label>
+          <input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            placeholder="name@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="field-input"
+          />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="password">
+            Password
+          </label>
+          <input
+            id="password"
+            type="password"
+            required
+            minLength={8}
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="field-input"
+          />
+          <p className="mt-1.5 text-xs text-slate-500">Minimum 8 characters.</p>
+        </div>
+        <button type="submit" disabled={submitting} className="btn btn-primary w-full">
+          {submitting && <Spinner />}
+          {submitting ? 'Creating account...' : 'Register'}
+        </button>
+      </form>
+    </AuthShell>
   )
 }

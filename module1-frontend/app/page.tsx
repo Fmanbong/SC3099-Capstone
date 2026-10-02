@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { LoadingState } from '@/components/Spinner'
 
 export default function Home() {
   const { isAuthenticated, loading } = useAuth()
@@ -14,8 +15,8 @@ export default function Home() {
   }, [loading, isAuthenticated, router])
 
   return (
-    <main className="min-h-screen flex items-center justify-center">
-      <p className="text-gray-500">Loading SAIV...</p>
+    <main className="flex min-h-screen items-center justify-center">
+      <LoadingState>Loading SAIV...</LoadingState>
     </main>
   )
 }

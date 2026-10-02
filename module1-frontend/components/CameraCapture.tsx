@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { requestCameraStream, stopStream, captureFrame, CameraError } from '@/lib/camera'
 import Alert from './Alert'
+import Spinner from './Spinner'
+import { CameraIcon, RefreshIcon } from './icons'
 
 interface CameraCaptureProps {
   onCapture: (base64Image: string) => void
@@ -84,15 +86,21 @@ export default function CameraCapture({
     )
   }
 
+  // Same rounded frame for the live view and the captured photo.
+  const frame = 'relative mx-auto w-full max-w-xs overflow-hidden rounded-2xl bg-slate-900 shadow-sm'
+
   if (capturedPreview) {
     return (
-      <div className="space-y-2">
-        <img src={capturedPreview} alt="Captured frame" className="rounded w-full max-w-xs mx-auto" />
+      <div className="space-y-3 text-center">
+        <div className={frame}>
+          <img src={capturedPreview} alt="Captured frame" className="block w-full" />
+        </div>
         <button
           type="button"
           onClick={() => setCapturedPreview(null)}
-          className="text-sm text-blue-700 underline block mx-auto"
+          className="btn btn-secondary"
         >
+          <RefreshIcon className="h-4 w-4" />
           Retake
         </button>
       </div>
@@ -100,20 +108,34 @@ export default function CameraCapture({
   }
 
   return (
-    <div className="space-y-3 text-center">
-      <p className="text-sm text-gray-600">{instructions}</p>
-      <div className="relative inline-block">
+    <div className="space-y-4 text-center">
+      <p className="text-sm text-slate-600">{instructions}</p>
+      <div className={frame}>
+        {/* Until the stream reports its size the video has no height, so hold a 4:3 box open. */}
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
           onLoadedMetadata={() => setReady(true)}
-          className="rounded w-full max-w-xs mx-auto -scale-x-100"
+          className={`block w-full -scale-x-100 ${ready ? '' : 'aspect-[4/3]'}`}
         />
+        {!ready && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-slate-300">
+            <Spinner className="h-6 w-6" />
+            Starting camera...
+          </div>
+        )}
+        {ready && (
+          // Oval guide showing where to position the face.
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 m-auto h-[78%] w-[52%] rounded-[50%] border-2 border-dashed border-white/70"
+          />
+        )}
         {countdown !== null && countdown > 0 && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded">
-            <span className="text-white text-4xl font-bold">{countdown}</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+            <span className="text-6xl font-bold text-white drop-shadow">{countdown}</span>
           </div>
         )}
       </div>
@@ -121,8 +143,9 @@ export default function CameraCapture({
         type="button"
         onClick={startCountdown}
         disabled={!ready || countdown !== null}
-        className="bg-blue-700 text-white px-4 py-2 rounded disabled:opacity-50"
+        className="btn btn-primary w-full max-w-xs"
       >
+        <CameraIcon />
         {countdown !== null ? 'Capturing...' : 'Capture Photo'}
       </button>
     </div>

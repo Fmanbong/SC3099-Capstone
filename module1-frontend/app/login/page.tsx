@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import Alert from '@/components/Alert'
+import AuthShell from '@/components/AuthShell'
+import Spinner from '@/components/Spinner'
 
 function LoginForm() {
   const { login } = useAuth()
@@ -32,62 +34,57 @@ function LoginForm() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-white rounded-lg shadow p-6 space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold">SAIV</h1>
-          <p className="text-gray-500 text-sm">Sign in to check in to your class</p>
-        </div>
-
-        {expired && <Alert type="warning">Your session expired. Please sign in again.</Alert>}
-        {error && <Alert type="error">{error}</Alert>}
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full bg-blue-700 text-white py-2 rounded font-medium disabled:opacity-50"
-          >
-            {submitting ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="text-sm text-center text-gray-600">
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to check in to your class"
+      footer={
+        <>
           No account?{' '}
-          <Link href="/register" className="text-blue-700 underline">
+          <Link href="/register" className="font-semibold text-blue-700 hover:underline">
             Register
           </Link>
-        </p>
-      </div>
-    </main>
+        </>
+      }
+    >
+      {expired && <Alert type="warning">Your session expired. Please sign in again.</Alert>}
+      {error && <Alert type="error">{error}</Alert>}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="field-label" htmlFor="email">
+            Email
+          </label>
+          <input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            placeholder="name@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="field-input"
+          />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="password">
+            Password
+          </label>
+          <input
+            id="password"
+            type="password"
+            required
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="field-input"
+          />
+        </div>
+        <button type="submit" disabled={submitting} className="btn btn-primary w-full">
+          {submitting && <Spinner />}
+          {submitting ? 'Signing in...' : 'Sign In'}
+        </button>
+      </form>
+    </AuthShell>
   )
 }
 
