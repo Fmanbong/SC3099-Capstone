@@ -49,7 +49,10 @@ services:
     environment:
       DATABASE_URL: postgresql://saiv:saiv_password@postgres:5432/saiv
       REDIS_URL: redis://redis:6379
-      SECRET_KEY: your-secret-key-change-in-production
+      SECRET_KEY: ${SECRET_KEY:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      PUBLIC_TEST_MODE: ${PUBLIC_TEST_MODE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:8501"]}
       FACE_SERVICE_URL: http://face-recognition:8001
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:

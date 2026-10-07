@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect } from 'react'
-import { flushQueue } from '@/lib/offline-queue'
+import localforage from 'localforage'
+
+// Earlier builds queued failed check-ins here, including the captured face
+// image. Check-ins are now only ever submitted live, so anything left over
+// is deleted rather than replayed.
+const LEGACY_QUEUE_KEY = 'saiv_pending_checkins'
 
 export default function PwaSetup() {
   useEffect(() => {
@@ -11,14 +16,7 @@ export default function PwaSetup() {
       })
     }
 
-    const trySync = () => {
-      flushQueue().catch(() => {})
-    }
-
-    window.addEventListener('online', trySync)
-    trySync()
-
-    return () => window.removeEventListener('online', trySync)
+    localforage.removeItem(LEGACY_QUEUE_KEY).catch(() => {})
   }, [])
 
   return null

@@ -3,15 +3,18 @@
 import { useEffect, useState } from 'react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Alert from '@/components/Alert'
+import Spinner, { LoadingState } from '@/components/Spinner'
+import { ClockIcon } from '@/components/icons'
 import { api, extractErrorMessage } from '@/lib/api'
+import { displayText } from '@/lib/text'
 import type { CheckinHistoryItem } from '@/lib/types'
 
 const statusColor: Record<string, string> = {
-  approved: 'bg-green-100 text-green-800',
-  pending: 'bg-yellow-100 text-yellow-800',
-  flagged: 'bg-yellow-100 text-yellow-800',
-  rejected: 'bg-red-100 text-red-800',
-  appealed: 'bg-blue-100 text-blue-800',
+  approved: 'bg-green-50 text-green-700 ring-green-600/20',
+  pending: 'bg-amber-50 text-amber-800 ring-amber-600/20',
+  flagged: 'bg-amber-50 text-amber-800 ring-amber-600/20',
+  rejected: 'bg-red-50 text-red-700 ring-red-600/20',
+  appealed: 'bg-blue-50 text-blue-700 ring-blue-600/20',
 }
 
 function AppealForm({ checkinId, onDone }: { checkinId: string; onDone: () => void }) {
@@ -37,20 +40,18 @@ function AppealForm({ checkinId, onDone }: { checkinId: string; onDone: () => vo
   }
 
   return (
-    <div className="mt-2 space-y-2">
+    <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
       {error && <Alert type="error">{error}</Alert>}
       <textarea
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         placeholder="Explain why this check-in should be reconsidered..."
-        className="w-full border rounded px-3 py-2 text-sm"
+        aria-label="Appeal reason"
+        className="field-input text-sm"
         rows={3}
       />
-      <button
-        onClick={submit}
-        disabled={submitting}
-        className="bg-blue-700 text-white px-3 py-1.5 rounded text-sm disabled:opacity-50"
-      >
+      <button onClick={submit} disabled={submitting} className="btn btn-primary">
+        {submitting && <Spinner />}
         {submitting ? 'Submitting...' : 'Submit Appeal'}
       </button>
     </div>
@@ -62,26 +63,36 @@ function CheckinRow({ item, onAppealed }: { item: CheckinHistoryItem; onAppealed
   const canAppeal = item.status === 'flagged' || item.status === 'rejected'
 
   return (
-    <li className="bg-white border rounded-lg p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="font-medium">{item.session_name ?? item.session_id}</p>
-          <p className="text-xs text-gray-500">
-            {item.course_code ? `${item.course_code} · ` : ''}
-            {new Date(item.checked_in_at).toLocaleString()}
+    <li className="card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="break-words font-semibold">
+            {displayText(item.session_name) || item.session_id}
+          </p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+            {item.course_code && (
+              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-700">
+                {item.course_code}
+              </span>
+            )}
+            <span>{new Date(item.checked_in_at).toLocaleString()}</span>
+            {typeof item.risk_score === 'number' && (
+              <span>· risk {item.risk_score.toFixed(2)}</span>
+            )}
           </p>
         </div>
-        <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusColor[item.status] ?? 'bg-gray-100'}`}>
+        <span
+          className={`badge ring-1 ring-inset ${
+            statusColor[item.status] ?? 'bg-slate-100 text-slate-700 ring-slate-500/20'
+          }`}
+        >
           {item.status}
         </span>
       </div>
-      {typeof item.risk_score === 'number' && (
-        <p className="text-xs text-gray-400 mt-1">risk {item.risk_score.toFixed(2)}</p>
-      )}
       {canAppeal && !appealing && (
         <button
           onClick={() => setAppealing(true)}
-          className="text-sm text-blue-700 underline mt-2"
+          className="btn btn-secondary mt-3 px-3 py-1.5"
         >
           Appeal this check-in
         </button>
@@ -121,14 +132,22 @@ function HistoryList() {
     load()
   }, [])
 
-  if (loading) return <p className="text-center text-gray-500">Loading...</p>
+  if (loading) return <LoadingState>Loading...</LoadingState>
   if (error) return <Alert type="error">{error}</Alert>
   if (items.length === 0) {
-    return <p className="text-sm text-gray-500">You haven&apos;t checked in to any sessions yet.</p>
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-10 text-center">
+        <ClockIcon className="mx-auto h-10 w-10 text-slate-300" />
+        <p className="mt-3 font-semibold">No check-ins yet</p>
+        <p className="mt-1 text-sm text-slate-500">
+          You haven&apos;t checked in to any sessions yet.
+        </p>
+      </div>
+    )
   }
 
   return (
-    <ul className="space-y-2">
+    <ul className="space-y-3">
       {items.map((item) => (
         <CheckinRow key={item.id} item={item} onAppealed={load} />
       ))}
@@ -139,8 +158,11 @@ function HistoryList() {
 export default function HistoryPage() {
   return (
     <ProtectedRoute>
-      <main className="max-w-md mx-auto p-4 space-y-4">
-        <h1 className="text-xl font-bold">Check-in History</h1>
+      <main className="page">
+        <div>
+          <h1 className="page-title">Check-in History</h1>
+          <p className="page-subtitle">Your past check-ins and their review status.</p>
+        </div>
         <HistoryList />
       </main>
     </ProtectedRoute>

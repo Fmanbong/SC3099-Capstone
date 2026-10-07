@@ -8,6 +8,7 @@ export const metadata: Metadata = {
   title: 'SAIV - Secure Attendance System',
   description: 'Student check-in interface with liveness detection',
   manifest: '/manifest.json',
+  icons: { icon: '/icon.svg', apple: '/icon-192.png' },
 }
 
 export const viewport = {
@@ -21,7 +22,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-gray-50 min-h-screen">
+      <body className="min-h-screen">
         <AuthProvider>
           <PwaSetup />
           <Navbar />

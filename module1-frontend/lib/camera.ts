@@ -36,6 +36,8 @@ export function stopStream(stream: MediaStream | null) {
 
 /** Captures the current frame of a playing <video> element as base64 JPEG (no data-URL prefix). */
 export function captureFrame(video: HTMLVideoElement): string {
+  // A <video> with no frame yet reports 0x0 and would yield an empty image.
+  if (!video.videoWidth || !video.videoHeight) throw new Error('Camera is not ready')
   const canvas = document.createElement('canvas')
   canvas.width = video.videoWidth
   canvas.height = video.videoHeight

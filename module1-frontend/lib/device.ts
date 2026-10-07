@@ -1,7 +1,30 @@
 import localforage from 'localforage'
+import { api, extractErrorCode } from './api'
+import type { Device, DeviceChallenge } from './types'
 
-const FINGERPRINT_KEY = 'saiv_device_fingerprint'
-const KEYPAIR_KEY = 'saiv_device_keypair'
+const IDENTITY_KEY = 'identity'
+// Written by earlier builds, which kept only the public key. A device
+// registered from those can never sign, so they are dropped and replaced.
+const LEGACY_KEYS = ['saiv_device_fingerprint', 'saiv_device_keypair']
+
+// A CryptoKey survives only structured-clone storage, so this store is pinned
+// to IndexedDB instead of letting localforage fall back to localStorage.
+const deviceStore = localforage.createInstance({
+  name: 'saiv',
+  storeName: 'device',
+  driver: localforage.INDEXEDDB,
+})
+
+export interface DeviceIdentity {
+  fingerprint: string
+  publicKeyPem: string
+  privateKey: CryptoKey
+}
+
+export interface DeviceProof {
+  device_challenge_id: string
+  device_signature: string
+}
 
 async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input)
@@ -35,10 +58,7 @@ function canvasSignature(): string {
  * characteristics. Persisted locally so it stays constant across sessions
  * for THIS browser install, without needing a hardware ID.
  */
-export async function getDeviceFingerprint(): Promise<string> {
-  const cached = await localforage.getItem<string>(FINGERPRINT_KEY)
-  if (cached) return cached
-
+async function generateFingerprint(): Promise<string> {
   const parts = [
     navigator.userAgent,
     navigator.language,
@@ -52,10 +72,7 @@ export async function getDeviceFingerprint(): Promise<string> {
     // fingerprint can't be used to track the user across sites.
     crypto.randomUUID(),
   ]
-
-  const fingerprint = await sha256Hex(parts.join('||'))
-  await localforage.setItem(FINGERPRINT_KEY, fingerprint)
-  return fingerprint
+  return sha256Hex(parts.join('||'))
 }
 
 export function detectPlatform(): 'ios' | 'android' | 'web' | 'desktop' {
@@ -79,31 +96,120 @@ function toPem(base64: string): string {
   return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----`
 }
 
-interface StoredKeyPair {
-  publicKeyPem: string
-}
+async function loadOrCreateIdentity(): Promise<DeviceIdentity> {
+  try {
+    const stored = await deviceStore.getItem<DeviceIdentity>(IDENTITY_KEY)
+    if (stored?.fingerprint && stored.publicKeyPem && stored.privateKey) return stored
+  } catch {
+    // Storage unavailable (e.g. private browsing): fall through to a fresh identity.
+  }
 
-/**
- * Generates (or loads) an ECDSA P-256 key pair for this device, used to
- * identify the device on POST /devices/register. The private key is
- * generated non-extractable and never leaves this function or touches
- * storage/network; only the exported public key (PEM) is persisted and
- * sent to the backend.
- */
-export async function getOrCreateDeviceKeyPair(): Promise<StoredKeyPair> {
-  const cached = await localforage.getItem<StoredKeyPair>(KEYPAIR_KEY)
-  if (cached) return cached
-
+  // The fingerprint and key pair are created together and never mixed with
+  // older values: the backend binds one public key to one fingerprint.
   const keyPair = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
     ['sign', 'verify']
   )
-
   const spki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
-  const publicKeyPem = toPem(arrayBufferToBase64(spki))
+  const identity: DeviceIdentity = {
+    fingerprint: await generateFingerprint(),
+    publicKeyPem: toPem(arrayBufferToBase64(spki)),
+    privateKey: keyPair.privateKey,
+  }
 
-  const stored: StoredKeyPair = { publicKeyPem }
-  await localforage.setItem(KEYPAIR_KEY, stored)
-  return stored
+  try {
+    await deviceStore.setItem(IDENTITY_KEY, identity)
+    await Promise.all(LEGACY_KEYS.map((key) => localforage.removeItem(key)))
+  } catch {
+    // Not persisted: the identity still works until the page is closed.
+  }
+  return identity
+}
+
+let identityPromise: Promise<DeviceIdentity> | null = null
+
+/**
+ * Loads (or creates) this browser's device identity: a fingerprint plus an
+ * ECDSA P-256 key pair. The private key is generated non-extractable and is
+ * stored as a CryptoKey handle, so its key material cannot be read by script
+ * or sent anywhere; it can only be used to sign on this device.
+ */
+export function getDeviceIdentity(): Promise<DeviceIdentity> {
+  if (!identityPromise) {
+    identityPromise = loadOrCreateIdentity().catch((err) => {
+      identityPromise = null
+      throw err
+    })
+  }
+  return identityPromise
+}
+
+async function registerDevice(identity: DeviceIdentity): Promise<string | null> {
+  try {
+    const res = await api.post<Device>('/devices/register', {
+      device_fingerprint: identity.fingerprint,
+      device_name: `${detectPlatform()} browser`,
+      platform: detectPlatform(),
+      public_key: identity.publicKeyPem,
+    })
+    return res.data.id
+  } catch {
+    // Most likely the fingerprint belongs to another account on a shared
+    // device. The check-in still goes through and the backend flags it.
+    return null
+  }
+}
+
+/** Returns the backend id of this device for the signed-in user, registering it if needed. */
+export async function ensureDeviceRegistered(): Promise<string | null> {
+  const identity = await getDeviceIdentity()
+  const res = await api.get<Device[]>('/devices/my-devices')
+  const existing = res.data.find((d) => d.device_fingerprint === identity.fingerprint)
+  return existing?.id ?? registerDevice(identity)
+}
+
+function requestChallenge(deviceId: string, sessionId: string): Promise<DeviceChallenge> {
+  return api
+    .post<DeviceChallenge>(`/devices/${deviceId}/challenge`, { session_id: sessionId })
+    .then((res) => res.data)
+}
+
+/**
+ * Proves this check-in comes from the registered device: asks the backend
+ * for a one-use nonce tied to the session and signs it with the device key.
+ * Returns null if no proof could be produced; the check-in is then submitted
+ * without one and the backend flags it for review instead of trusting it.
+ */
+export async function createDeviceProof(sessionId: string): Promise<DeviceProof | null> {
+  try {
+    const identity = await getDeviceIdentity()
+    let deviceId = await ensureDeviceRegistered()
+    if (!deviceId) return null
+
+    let challenge: DeviceChallenge
+    try {
+      challenge = await requestChallenge(deviceId, sessionId)
+    } catch (err) {
+      if (extractErrorCode(err) !== 'DEVICE_KEY_REQUIRED') throw err
+      // The backend created this device itself from an earlier unsigned
+      // check-in, so it has no public key. Replace it with a keyed one.
+      await api.delete(`/devices/${deviceId}`)
+      deviceId = await registerDevice(identity)
+      if (!deviceId) return null
+      challenge = await requestChallenge(deviceId, sessionId)
+    }
+
+    const signature = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      identity.privateKey,
+      new TextEncoder().encode(challenge.nonce)
+    )
+    return {
+      device_challenge_id: challenge.id,
+      device_signature: arrayBufferToBase64(signature),
+    }
+  } catch {
+    return null
+  }
 }
