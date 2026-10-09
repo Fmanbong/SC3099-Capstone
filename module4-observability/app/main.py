@@ -97,6 +97,7 @@ if  st.sidebar.button("LOGOUT"):
     finally:
         st.session_state.logged_in = False
         st.session_state.login_data = None
+        st.session_state.pop("session export", None)  # clear attendance data when log out
     st.rerun()
 
 
@@ -300,79 +301,93 @@ elif  page == "SESSIONS":
         st.error("could not load sessions. check your backend connection")
         st.stop()
 
-    st.stop()  # TODO - might have to remove this later..
+    if  not sessions:  # empty list then cannot provide session to select
+        st.stop()
 
     session_options = {
         session["id"]: session["name"]
-        for session in sessions  # For every session in the sessions list , take ID and name and put into DICT
+        for session in sessions
     }
 
     selected_session_id = st.selectbox(
         "SELECT A SESSION",
-        options = list(session_options.keys()),
-        format_func = lambda session_id: session_options[session_id]
+        options=list(session_options),
+        format_func=lambda session_id: session_options[session_id],
     )
 
-    # this is just the entire DICT for the selected session
-    selected_session = next(
-        session for session in sessions
-        if session["id"] == selected_session_id
-    )
+    try:
+        selected_session = st.session_state.api.get_session(selected_session_id)  # fetch details from mod 2 API
+    except Exception:
+        st.error("could not load the selected session")
+        st.stop()
 
     st.subheader("SESSION DETAILS")
 
-    col1 , col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
     with col1:
         st.write(f"**SESSION ID:** {selected_session['id']}")
         st.write(f"**NAME:** {selected_session['name']}")
-        st.write(f"**COURSE:** {selected_session['course']}")
+        st.write(f"**COURSE:** {selected_session['course_code']}")
 
     with col2:
         st.write(f"**STATUS:** {selected_session['status']}")
-        st.write(f"**START:** {selected_session['start_time']}")
-        st.write(f"**END:** {selected_session['end_time']}")
-
+        st.write(f"**START:** {selected_session['scheduled_start']}")
+        st.write(f"**END:** {selected_session['scheduled_end']}")
 
     st.subheader("SESSION EXPORT")
 
-    export_checkins = [
-        checkin
-        for checkin in every_checkin
-        if checkin["session_id"] == selected_session["id"]
-    ]
+    # the prepared data for both the logged in user and selected session
+    export_key = (
+        st.session_state.login_data["user"]["id"],
+        selected_session_id,
+    )
 
-    export_checkins_df = pd.DataFrame(export_checkins)
-    session_csv_data = export_checkins_df.to_csv(index=False)
+    if  st.button("PREPARE SESSION CSV"):
+        st.session_state.pop("session_export", None)  # clear older download before fresh export
 
-    st.download_button(
-        "DOWNLOAD SESSION CSV",
-        session_csv_data,
-        f"session_{selected_session['id']}_checkins.csv",
-        "text/csv"
+        try:
+            csv_data = st.session_state.api.export_session(
+                selected_session_id
+            )
+            st.session_state.session_export = {
+                "key":  export_key,
+                "data": csv_data,
+            }
+        except Exception:
+            st.error("could not prepare the session export.")
+
+    prepared_export = st.session_state.get("session_export")
+
+    if  prepared_export and prepared_export["key"] == export_key:
+        st.download_button(
+            "DOWNLOAD SESSION CSV",
+            data=prepared_export["data"],
+            file_name=f"session_{selected_session_id}_attendance.csv",
+            mime="text/csv",
         )
 
+    st.subheader("SESSION CHECK INS")
 
-    st.subheader("SESSION CHECK-INS")
-
-    # TODO - temp mock data
-    # TODO - replace with st.session_state.api.get_session_checkins(selected_session_id) once mod 2 up and running
-
-    session_checkins = [
-        checkin
-        for checkin in every_checkin
-        if checkin["session_id"] == selected_session_id
-    ]
-
-    if  session_checkins:
-        st.dataframe(
-            session_checkins,
-            use_container_width = True
+    try:
+        session_checkins = (
+            st.session_state.api.get_session_checkins(selected_session_id)  # returns an array
         )
-    else:
-        st.info("no checkins found for this session")  # this is if module 2 gives us an empty list or session
 
+        if  session_checkins:
+            st.dataframe(
+                session_checkins,
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("no check-ins are recorded for this session yet.")  # no records is valid result for new session
 
+    except Exception:
+        st.error("Could not load check-ins for this session.")
+
+    st.info("session creation is not connected yet.")
+    st.stop()
 
     st.divider()
     st.subheader("CREATE NEW SESSION")

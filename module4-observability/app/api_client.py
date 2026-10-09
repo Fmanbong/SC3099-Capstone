@@ -54,20 +54,31 @@ class APIClient:
             self.set_token(None)
 
 
-    def get(self, endpoint):
+    def get(self, endpoint, params=None):
         headers = {}
 
-        if self.token:
-            headers["authorization"] = f"bearer {self.token}"
+        if  self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
 
         response = requests.get(
             f"{self.base_url}{endpoint}",
             headers=headers,
+            params=params,
             timeout=self.timeout,
         )
         response.raise_for_status()
 
-        return response.json()  # this converts the resposne into PY data so we can work on it :)
+        return response.json()
+
+
+    def get_courses(self, instructor_id):
+        return self.get(
+            "/api/v1/courses/",
+            params={
+                "instructor_id": instructor_id,
+                "limit": 100,
+            },
+        )
 
 
     def get_session(self, session_id):
@@ -118,7 +129,7 @@ class APIClient:
 
         headers = {}
 
-        if self.token:
+        if  self.token:
             headers["authorization"] = f"bearer {self.token}"  # TODO - not sure what this does
 
         response = requests.post(
@@ -139,7 +150,7 @@ class APIClient:
     def patch(self, endpoint, data=None):
         headers = {}
 
-        if self.token:
+        if  self.token:
             headers["authorization"] = f"bearer {self.token}"
 
         response = requests.patch(
@@ -160,7 +171,7 @@ class APIClient:
     def delete(self, endpoint):
         headers = {}
 
-        if self.token:
+        if  self.token:
             headers["authorization"] = f"bearer {self.token}"
 
         response = requests.delete(
@@ -180,7 +191,7 @@ class APIClient:
     def download(self, endpoint):
         headers = {}
 
-        if self.token:
+        if  self.token:
             headers["authorization"] = f"bearer {self.token}"
 
         response = requests.get(
