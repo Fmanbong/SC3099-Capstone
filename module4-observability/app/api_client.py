@@ -89,8 +89,23 @@ class APIClient:
         return self.get("/api/v1/sessions/")
 
 
-    def get_checkins(self):
-        return self.get("/api/v1/checkins/")
+    def get_checkin(self, checkin_id):
+        return self.get(f"/api/v1/checkins/{checkin_id}")  # to get authorized detail and verification evidence
+
+
+    def get_checkins(self, status=None, session_id=None, limit=50, offset=0, review_only=False):
+        params = {"limit": limit, "offset": offset}
+
+        if  session_id is not None:
+            params["session_id"] = session_id
+        if  review_only:
+            # includes both flagged and appealed records
+            endpoint = "/api/v1/checkins/flagged"
+        else:
+            endpoint = "/api/v1/checkins/"
+            if  status is not None:
+                params["status"] = status
+        return self.get(endpoint, params=params)
 
 
     def get_session_checkins(self, session_id):

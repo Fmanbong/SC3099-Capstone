@@ -26,6 +26,8 @@ import pandas as pd
 import plotly.express as px
 import os
 from api_client import APIClient
+from datetime   import datetime, timedelta, time
+from zoneinfo   import ZoneInfo
 
 # page setup
 st.set_page_config(
@@ -277,6 +279,118 @@ if    page == "OVERVIEW":
 elif  page == "SESSIONS":
     st.header("SESSIONS")
 
+    deleted_message = st.session_state.pop("session_deleted_message", None)
+    if  deleted_message:
+        st.success(deleted_message)
+
+    st.subheader("CREATE NEW SESSION")
+
+    try:
+        # we want to use the authenticated user id and not the manual entered one
+        instructor_id = st.session_state.login_data["user"]["id"]
+        courses_response = st.session_state.api.get_courses(
+            instructor_id
+        )
+        courses = courses_response["items"]
+
+    except Exception:
+        st.error("could not load your assigned courses.")
+
+    else:
+        if  courses:
+            course_options = {
+                course["id"]: f"{course['code']} — {course['name']}"
+                for course in courses
+            }
+
+            selected_course_id = st.selectbox(
+                "COURSE",
+                options=list(course_options),
+                format_func=lambda course_id: course_options[course_id],
+                key="create_session_course",
+            )
+
+            singapore = ZoneInfo("Asia/Singapore")  # we use singapore time
+            tomorrow  = (
+                datetime.now(singapore) + timedelta(days=1)
+            ).date()
+
+            created_message = st.session_state.pop("session_created_message", None)
+            if  created_message:
+                st.success(created_message)
+
+            with st.form("backend_create_session_form"):
+                session_name = st.text_input("SESSION NAME")
+
+                start_date = st.date_input(
+                    "START DATE", value=tomorrow
+                )
+                start_time = st.time_input(
+                    "START TIME (SINGAPORE)", value=time(9, 0)
+                )
+                end_date   = st.date_input(
+                    "END DATE", value=tomorrow
+                )
+                end_time   = st.time_input(
+                    "END TIME (SINGAPORE)", value=time(10, 0)
+                )
+
+                st.caption(
+                    "venue and geofence settings use course defaults. "
+                    "liveness checking remains enabled."
+                )
+
+                submitted = st.form_submit_button("CREATE SESSION")
+
+            if  submitted:
+                # Include the UTC offset in timestamps sent to Module 2.
+                scheduled_start = datetime.combine(
+                    start_date, start_time, tzinfo=singapore
+                )
+                scheduled_end = datetime.combine(
+                    end_date, end_time, tzinfo=singapore
+                )
+
+                if   not session_name.strip():
+                    st.error("a session name is required.")
+                elif scheduled_start <= datetime.now(singapore):
+                    st.error("the session must start in the future.")
+                elif scheduled_end <= scheduled_start:
+                    st.error("the end must be after the start.")
+                else:
+                    try:
+                        created_session = (
+                            st.session_state.api.create_session(
+                                {
+                                    "course_id": selected_course_id,
+                                    "name": session_name.strip(),
+                                    "scheduled_start": scheduled_start.isoformat(),
+                                    "scheduled_end": scheduled_end.isoformat(),
+                                }
+                            )
+                        )
+
+                        st.session_state.session_created_message = (
+                            f"created session: {created_session['name']}"
+                        )
+                        st.rerun()
+
+                    except Exception:
+                        st.error(
+                            "could not create the session. "
+                            "the backend must also accept its settings "
+                            "and your course permissions."
+                        )
+
+        else:
+            st.info(
+                "no assigned courses are available. "
+                "an administrator must assign a course before "
+                "you can create a session"
+            )
+
+    st.divider()
+
     st.subheader("ALL SESSIONS")
 
     try:
@@ -335,6 +449,132 @@ elif  page == "SESSIONS":
         st.write(f"**START:** {selected_session['scheduled_start']}")
         st.write(f"**END:** {selected_session['scheduled_end']}")
 
+    st.subheader("EDIT SESSION NAME")
+
+    user = st.session_state.login_data["user"]
+
+    # this si to match the backend owner rule
+    can_manage_session = (
+        user["role"] == "admin"
+        or selected_session["instructor_id"] == user["id"]
+    )
+
+    update_message = st.session_state.pop(
+        "session_update_message", None
+    )
+    if  update_message:
+        st.success(update_message)
+
+    if  can_manage_session:
+        with st.form(f"edit_session_{selected_session_id}"):
+            updated_name = st.text_input(
+                "SESSION NAME",
+                value=selected_session["name"],
+                key=f"edit_name_{selected_session_id}",
+            )
+            save_name = st.form_submit_button("SAVE NAME")
+
+        if  save_name:
+            if not updated_name.strip():
+                st.error("a session name is required.")
+            else:
+                try:
+                    st.session_state.api.update_session(
+                        selected_session_id,
+                        {"name": updated_name.strip()},
+                    )
+
+                    # a previously prepared csv might contain old name
+                    st.session_state.pop("session_export", None)
+                    st.session_state.session_update_message = (
+                        "Session name updated."
+                    )
+                    st.rerun()
+
+                except Exception:
+                    st.error("could not update the session name.")
+    else:
+        st.info(
+            "only the owning instructor or an administrator "
+            "can modify this session."
+        )
+
+    st.subheader("SESSION STATUS")
+
+    # this is only transitions by mod 2
+    allowed_transitions = {
+        "scheduled": ["active", "cancelled"],
+        "active": ["closed", "cancelled"],
+        "closed": ["cancelled"],
+        "cancelled": [],
+    }
+
+    current_status = selected_session["status"]
+    next_statuses  = allowed_transitions.get(current_status, [])
+
+    if  can_manage_session and next_statuses:
+        with st.form(f"session_status_{selected_session_id}"):
+            next_status = st.selectbox(
+                "NEW STATUS",
+                options=next_statuses,
+            )
+
+            # nned an explicit acknowledgement before changing status
+            confirmed = st.checkbox(
+                "I confirm this session status change."
+            )
+            change_status = st.form_submit_button("UPDATE STATUS")
+
+        if  change_status:
+            if not confirmed:
+                st.error("confirm the status change first.")
+            else:
+                try:
+                    st.session_state.api.update_session(
+                        selected_session_id,
+                        {"status": next_status},
+                    )
+
+                    st.session_state.pop("session_export", None)
+                    st.session_state.session_update_message = (
+                        f"Session status updated to {next_status}."
+                    )
+                    st.rerun()
+
+                except Exception:
+                    st.error("could not update the session status.")
+
+    elif can_manage_session:
+        st.info("This session has no further status transitions.")
+    else:
+        st.caption(
+            "status changes require the session owner "
+            "or an administrator."
+        )
+
+    if  can_manage_session and current_status == "scheduled":
+        st.subheader("DELETE SCHEDULED SESSION")
+
+        with st.form(f"delete_session_{selected_session_id}"):
+            confirm_delete = st.checkbox(
+                "i understand that this permanently deletes "
+                "the selected session."
+            )
+            delete_submitted = st.form_submit_button("DELETE SESSION")
+
+        if  delete_submitted:
+            if not confirm_delete:
+                st.error("Confirm deletion first.")
+            else:
+                try:
+                    # successful deletion returns 204 with no json body.
+                    st.session_state.api.delete_session(selected_session_id)
+                    st.session_state.pop("session_export", None)
+                    st.session_state.session_deleted_message = ("Scheduled session deleted.")
+                    st.rerun()
+                except Exception:
+                    st.error("Could not delete the session.")
+
     st.subheader("SESSION EXPORT")
 
     # the prepared data for both the logged in user and selected session
@@ -386,210 +626,173 @@ elif  page == "SESSIONS":
     except Exception:
         st.error("Could not load check-ins for this session.")
 
-    st.info("session creation is not connected yet.")
-    st.stop()
-
-    st.divider()
-    st.subheader("CREATE NEW SESSION")
-
-    with st.form("create_session_form"):
-        session_name = st.text_input("SESSION NAME")
-        course_id = st.text_input("COURSE ID")
-
-        start_time = st.text_input(
-            "START TIME",
-            placeholder = "DD-MM-YYYY HH:MM"
-        )
-
-        end_time = st.text_input(
-            "END TIME",
-            placeholder = "DD-MM-YYYY HH:MM"
-        )
-
-        st.write("GEOFENCE CONFIGURATION")  # For the geographical boundary of the session
-
-        latitude = st.number_input(
-            "LATITUDE",
-            value = 1.3521,  # TODO - hardcoded temp value - remove once mod 2 up and running
-            format = "%.6f"
-        )
-
-        longitude = st.number_input(
-            "LONGITUDE",
-            value = 103.8198,
-            format = "%.6f"
-        )
-
-        radius = st.number_input(
-            "RADIUS (METRES)",
-            min_value = 1,  # cannot enter 0 or a negative number
-            value = 100
-        )
-
-        create_button = st.form_submit_button("CREATE SESSION")
-
-        if  create_button:
-            if  not session_name or not course_id:
-                st.error("session name and course id are required")
-            else:
-                new_session = {
-                    "id":         len(st.session_state.sessions) + 1,
-                    "name":       session_name,
-                    "course":  course_id,
-                    "status":     "active",
-                    "start_time": start_time,
-                    "end_time":   end_time,
-                    "geofence": {
-                        "latitude":  latitude,
-                        "longitude": longitude,
-                        "radius":    radius
-                    }
-                }
-
-                st.session_state.sessions.append(new_session)
-                st.success("session form completed")
-                st.rerun()
-
-
-elif page == "CHECK-INS":
+elif page ==  "CHECK-INS":
     st.header("CHECK-INS")
 
-    # TODO - temp mock data
-    # TODO - replace with st.session_state.api.get_checkins() when mod 2 is running
+    try:
+        sessions_response = st.session_state.api.get_sessions()
+        filter_sessions   = sessions_response["items"]
+    except Exception:
+        st.error("could not load sessions for the filter.")
+        st.stop()
 
-    st.subheader("FILTERS")
+    # None represents all sessions ,  real IDs remain UUID strings
+    session_labels = {
+        session["id"]: session["name"]
+        for session in filter_sessions
+    }
 
-    col1 , col2 = st.columns(2)
+    selected_filter_session_id = st.selectbox(
+        "SESSION",
+        options=[None] + list(session_labels),
+        format_func=lambda session_id: ("All" if session_id is None else session_labels[session_id]),
+        key="checkins_session_filter",
+    )
 
-    with col1:
-        session_filter = st.selectbox(
-            "SESSION",
-            ["ALL"] + [
-                f"{session['id']} - {session['name']}"
-                for session in sessions
+    # make the current pagination limit visible.
+    if  sessions_response["total"] > len(filter_sessions):
+        st.caption(
+            "the session dropdown currently shows only "
+            "the first page of authorized sessions."
+        )
+
+    review_only = st.checkbox("ONLY SHOW CHECK-INS NEEDING REVIEW", key="checkins_review_only")
+
+    # these are the actual statuses supported by module 2.
+    status_filter = st.selectbox(
+        "STATUS",
+        options=["All", "approved", "flagged", "rejected", "pending", "appealed",],
+        key="checkins_status_filter",
+        disabled=review_only
+    )
+
+    filter_context = (selected_filter_session_id, status_filter, review_only)
+    if  st.session_state.get("checkins_filter_context") != filter_context:
+        st.session_state.checkins_page = 1
+        st.session_state.checkins_filter_context = filter_context
+
+    # session state initializes and resets the page number
+    page_number = st.number_input("PAGE", min_value=1, step=1, key="checkins_page")
+    page_size = 50
+    offset = (page_number - 1) * page_size
+
+    st.button("REFRESH CHECK-INS")  # reruns the page and fetch fresh data
+
+    try:
+        # "All" means no status restriction in the backend request
+        selected_status = (None if status_filter == "All" else status_filter)
+
+        # mod 2 applies both filters and enforces teaching access.
+        checkins_response = st.session_state.api.get_checkins(
+            status=selected_status,
+            session_id=selected_filter_session_id,
+            limit=page_size,
+            offset=offset,
+            review_only=review_only,
+        )
+        checkins = checkins_response["items"]
+
+        # explain an empty result caused by requesting a later page.
+        total = checkins_response["total"]
+        total_pages = max(1, (total + page_size - 1) // page_size)
+
+        st.caption(f"Page {page_number}; available pages: {total_pages}")
+
+        if  page_number > total_pages:
+            st.warning("This page is beyond the results. Select a lower page.")
+
+        st.caption(
+            f"Showing {len(checkins)} of "
+            f"{checkins_response['total']} authorized check-ins."
+        )
+
+        if  checkins:
+            checkin_rows = [
+                {
+                    "Check-in ID": checkin["id"],
+                    "Student": checkin.get("student_name"),
+                    "Session": checkin.get("session_name"),
+                    "Time": checkin["checked_in_at"],
+                    "Status": checkin["status"],
+                    "Risk score": checkin.get("risk_score"),
+                }
+                for checkin in checkins
             ]
-        )
 
-    with col2:
-        status_filter = st.selectbox(
-            "VERIFICATION STATUS",
-            ["ALL" , "success" , "flagged"]
-        )
-
-    filtered_checkins = every_checkin
-
-    if  session_filter != "ALL":
-        selected_filter_session_id = int(session_filter.split(" - ")[0])
-
-        filtered_checkins = [
-            checkin
-            for checkin in filtered_checkins
-            if checkin["session_id"] == selected_filter_session_id
-        ]
-
-    if  status_filter != "ALL":
-        filtered_checkins = [
-            checkin
-            for checkin in filtered_checkins
-            if checkin["verification_status"] == status_filter
-        ]
-
-    st.subheader("CHECK-IN RECORDS")
-
-    if  filtered_checkins:  # only run this code if anything survived our filters
-        st.dataframe(
-            filtered_checkins,
-            use_container_width = True
-        )
-    else:
-        st.info("no checkins match the selected filters")
-
-
-    checkins_df = pd.DataFrame(filtered_checkins)
-    csv_data = checkins_df.to_csv(index=False)  # False because I do not want pandas auto generated row numbers
-
-    st.download_button(
-        "DOWNLOAD CHECK-INS CSV",
-        csv_data,
-        "checkins.csv",
-        "text/csv"
-        )
-
-
-    if  filtered_checkins:
-        st.divider()
-
-        st.subheader("CHECK-IN DETAILS")
-
-        checkin_options = {
-            checkin["checkin_id"]: checkin
-            for checkin in filtered_checkins
-        }
-
-        selected_checkin_id = st.selectbox(
-            "SELECT CHECK-IN",
-            options = list(checkin_options.keys()),
-            format_func = lambda checkin_id: (
-                f"{checkin_id} - "
-                f"{checkin_options[checkin_id]['student_name']}"
-            )
-        )
-
-        selected_checkin = checkin_options[selected_checkin_id]
-
-        # NOTE - this is just temp data so I just added a few fields , you can add more such as the student name , timestamp , etc
-        st.write(
-            f"**STUDENT ID:** {selected_checkin['student_id']}"
-        )
-
-        st.write(
-            f"**CHECKIN ID:** {selected_checkin['checkin_id']}"
-        )
-
-        st.write(
-            f"**VERIFICATION STATUS:** "
-            f"{selected_checkin['verification_status']}"
-        )
-
-        st.subheader("VERIFICATION SIGNALS")
-
-        col1 , col2 , col3 = st.columns(3)
-
-        with col1:
-            st.metric(
-                "RISK SCORE",
-                f"{selected_checkin['risk_score']:.2f}"
-
+            st.dataframe(
+                checkin_rows,
+                use_container_width=True,
+                hide_index=True,
             )
 
-        with col2:
-            st.metric(
-                "LIVENESS SCORE",
-                f"{selected_checkin['liveness_score']:.2f}"
+            st.subheader("CHECK-IN DETAILS")
 
+            # offer records from the currently displayed page.
+            checkin_labels = {
+                checkin["id"]: (
+                    f"{checkin.get('student_name') or 'Unknown student'}"
+                    f" — {checkin['id']}"
+                )
+                for checkin in checkins
+            }
+
+            selected_checkin_id = st.selectbox(
+                "SELECT CHECK-IN",
+                options=list(checkin_labels),
+                format_func=lambda checkin_id: checkin_labels[checkin_id],
+                key="checkin_detail_selection",
             )
 
-        with col3:
-            st.metric(
-                "FACE MATCH SCORE",
-                f"{selected_checkin['face_match_score']:.2f}"
+            try:
+                detail = st.session_state.api.get_checkin(selected_checkin_id)
 
-            )
+                st.write(f"**STATUS:** {detail['status']}")
 
-        st.subheader("GPS LOCATION")
+                # missing evidence must remain visibly missing.
+                score_columns = st.columns(3)
+                score_fields = [
+                    ("RISK SCORE", "risk_score"),
+                    ("LIVENESS SCORE", "liveness_score"),
+                    ("FACE MATCH SCORE", "face_match_score"),
+                ]
 
-        col1 , col2 = st.columns(2)
+                for column, (label, field) in zip(
+                    score_columns, score_fields
+                ):
+                    score = detail.get(field)
+                    column.metric(
+                        label,
+                        "Not available" if score is None
+                        else f"{score:.2f}",
+                    )
 
-        with col1:
-            st.write(
-                f"**LATITUDE:** {selected_checkin['latitude']}"
-            )
+                st.write(
+                    "**LIVENESS PASSED:**",
+                    detail.get("liveness_passed")
+                    if detail.get("liveness_passed") is not None
+                    else "Not evaluated",
+                )
+                st.write(
+                    "**FACE MATCH PASSED:**",
+                    detail.get("face_match_passed")
+                    if detail.get("face_match_passed") is not None
+                    else "Not evaluated",
+                )
 
-        with col2:
-            st.write(
-                f"**LONGITUDE:** {selected_checkin['longitude']}"
-            )
+                st.subheader("RISK SIGNALS")
+                signals = detail.get("risk_signals") or []
+                if  signals:
+                    st.json(signals)
+                else:
+                    st.info("No risk signals are recorded.")
 
+            except Exception:
+                st.error("Could not load check-in details.")
+        else:
+            st.info("no check-ins are available for your courses yet.")
+
+    except Exception:
+        st.error("could not load check-ins from the backend.")
 
 elif  page == "AUDIT LOGS":
     st.header("AUDIT LOGS")
