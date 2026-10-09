@@ -44,22 +44,29 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 st.title("SAIV INSTRUCTOR DASHBOARD")
+logout_warning = st.session_state.pop("logout warning", None)
+if  logout_warning:
+    st.warning(logout_warning)
 
-st.session_state.logged_in = True  # TODO - super important to remove this when mod 2 login feature up and running - this just helps us run our mock data currently
 
-if not st.session_state.logged_in:
+if  not st.session_state.logged_in:
     st.subheader("INSTRUCTOR LOGIN")
 
     email = st.text_input("email")
     password = st.text_input("password", type="password")
 
-    if st.button("Login"):
+    if  st.button("Login"):
         try:
             login_data = st.session_state.api.login(email, password)
-            st.session_state.login_data = login_data
-            st.session_state.logged_in  = True
-            st.success("Login success!")
-            st.rerun()
+            user = login_data["user"]
+
+            if  user["role"] not in {"instructor", "admin"}:
+                st.session_state.api.set_token(None)
+                st.error("need instructor or admin account")
+            else:
+                st.session_state.login_data = login_data
+                st.session_state.logged_in  = True
+                st.rerun()
         except Exception as e:
             st.error(f"Login Failed : {e}")
 
@@ -80,10 +87,16 @@ page = st.sidebar.radio(  # this creates a group of selectable options
 )
 
 
-if st.sidebar.button("LOGOUT"):
-    st.session_state.logged_in  = False
-    st.session_state.login_data = None
-    st.session_state.api.token  = None
+if  st.sidebar.button("LOGOUT"):
+    try:
+        st.session_state.api.logout()
+    except Exception:
+        st.session_state.logout_warning = (
+            "You are logged out of this dashboard but backend session cancellation could not be confirmed"
+        )
+    finally:
+        st.session_state.logged_in = False
+        st.session_state.login_data = None
     st.rerun()
 
 
@@ -165,166 +178,129 @@ every_checkin = [
 
 
 # pages
-if   page == "OVERVIEW":
+if    page == "OVERVIEW":
     st.header("OVERVIEW")
 
     try:
-
-        # TODO - temp mock data , remember to remove once we have mod 2 up and running
-        # TODO - this will be replaced with "overview = st.session_state.api.get_overview_stats()"
-
-        overview = {
-            "total_sessions":          12,
-            "current_active_sessions": 2,
-            "total_checkins":          482,
-            "current_active_checkins": 453
-        }
-
+        overview = st.session_state.api.get_overview_stats()
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             st.metric(
-                "TOTAL SESSIONS",
-                overview["total_sessions"]
+                "TOTAL  SESSIONS", overview["total_sessions"]
             )
 
         with col2:
             st.metric(
-                "CURRENT ACTIVE SESSIONS",
-                overview["current_active_sessions"]
+                "ACTIVE SESSIONS", overview["active_sessions"]
             )
 
         with col3:
-            st.metric(
-                "TOTAL CHECK-INS",
-                overview["total_checkins"]
-            )
+            st.metric("CHECK INS TODAY (UTC)", overview["total_checkins_today"])
 
         with col4:
-            success_rate = (
-                (overview["current_active_checkins"] / overview["total_checkins"]) * 100
+            approval_rate = overview["approval_rate"] * 100
+            st.metric("APPROVAL RATE", f"{approval_rate:.1f}%")
+
+        checkins_response = st.session_state.api.get_checkins()
+        recent_checkins = checkins_response["items"][:10]  # sort new , display latest 10
+
+        st.subheader("VERIFICATION STATUS — LATEST 10 CHECK INS")
+
+        if  recent_checkins:
+            status_df = pd.DataFrame(
+                {"status": checkin["status"]}
+                for checkin in recent_checkins
             )
+            verification_df = (status_df["status"].value_counts().rename_axis("status").reset_index(name="count"))
 
-            st.metric(
-                "SUCCESS RATE",
-                f"{success_rate:.1f}%"
-            )
-
-
-        verification_counts = {}
-
-        for checkin in every_checkin:
-            status = checkin["verification_status"]
-
-            if status not in verification_counts:
-                verification_counts[status] = 0
-            verification_counts[status] += 1
-
-        verification_df = pd.DataFrame(
-            list(verification_counts.items()),
-            columns = ["verification_status", "count"]
-        )
-
-        st.subheader("VERIFICATION STATUS")
-
-        st.plotly_chart(
-            px.pie(
-                verification_df,
-                names = "verification_status",
-                values = "count"
+            st.plotly_chart(
+                px.pie(
+                    verification_df,
+                    names  = "status",
+                    values = "count",
                 ),
-            use_container_width = True
-        )
-
+                use_container_width=True,
+            )
+        else:
+            st.info("no check ins are available to display verification statuses")
 
         st.subheader("RECENT CHECK-INS")
 
-        recent_checkins = [
-            {
-                "student": "Alice Tan",
-                "session": "CS50 Lecture 1",
-                "time":    "10:32 AM",
-                "status":  "success"
-            },
+        if  recent_checkins:
+            recent_rows = [
+                {
+                    "Student": checkin["student_name"],
+                    "Session": checkin["session_name"],
+                    "Time":    checkin["checked_in_at"],
+                    "Status":  checkin["status"],
+                }
+                for checkin in recent_checkins
+            ]
 
-
-            {
-                "student": "Benny Lim",
-                "session": "CS50 Lecture 1",
-                "time":    "10:30 AM",
-                "status":  "success"
-            },
-
-
-            {
-                "student": "James Tay",
-                "session": "CS50 Lecture 1",
-                "time":    "10:28 AM",
-                "status":  "flagged"
-            }
-        ]
-
-        st.dataframe(
-            recent_checkins,
-            use_container_width = True  # makes the table use the available width of the page
-        )
-
-
-        hour_counts = {}
-
-        for checkin in every_checkin:
-            timestamp = pd.to_datetime(
-                checkin["timestamp"],
-                format = "%d-%m-%Y %H:%M"
+            st.dataframe(
+                recent_rows,
+                use_container_width=True,  # makes the table use the available width of the page
+                hide_index=True,
             )
 
-            hour = timestamp.hour
+        else:
+            st.info("no check ins available for your courses yet")
 
-            if hour not in hour_counts:
-                hour_counts[hour] = 0
+        st.subheader("CHECK INS BY DAY (UTC)")
 
-            hour_counts[hour] += 1
+        daily_checkins = overview["trends"]["checkins_by_day"]
+        daily_df = pd.DataFrame(daily_checkins)
 
-        hour_df = pd.DataFrame(
-            list(hour_counts.items()),
-            columns = ["hour", "checkins"]
-        )
-
-        hour_df = hour_df.sort_values("hour")
-
-        st.subheader("CHECK-INS BY HOUR")
-
-        st.plotly_chart(
-            px.bar(
-                hour_df,
-                x = "hour",
-                y = "checkins",
-                labels = {
-                    "hour" : "Hour",
-                    "checkins": "Check-ins"
-                }
-            ),
-            use_container_width = True
-        )
-
+        if  daily_df.empty:
+            st.info("no daily check in data available")
+        else:
+            st.plotly_chart(
+                px.bar(
+                    daily_df,
+                    x="date",
+                    y="count",
+                    labels={
+                        "date":  "Date (UTC)",
+                        "count": "Check ins",
+                    },
+                ),
+                use_container_width=True,
+            )
 
         st.json(overview)
     except Exception as e:
         st.error(f"could not load overview statistics : {e}")
 
 
-elif page == "SESSIONS":
+elif  page == "SESSIONS":
     st.header("SESSIONS")
-
-    # TODO - temporary mock data
-    # TODO - replace with st.session_state.api.get_sessions() when mod 2 is running
 
     st.subheader("ALL SESSIONS")
 
-    st.dataframe(
-        sessions,
-        use_container_width = True
-    )
+    try:
+        sessions_response = st.session_state.api.get_sessions()
+        sessions = sessions_response["items"]
+
+        st.caption(
+            f"Showing {len(sessions)} of "
+            f"{sessions_response['total']} authorized sessions"  # show all result count even when API return one page
+        )
+
+        if sessions:
+            st.dataframe(
+                sessions,
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("no sessions are available for your courses yet")
+
+    except Exception:
+        st.error("could not load sessions. check your backend connection")
+        st.stop()
+
+    st.stop()  # TODO - might have to remove this later..
 
     session_options = {
         session["id"]: session["name"]
@@ -388,7 +364,7 @@ elif page == "SESSIONS":
         if checkin["session_id"] == selected_session_id
     ]
 
-    if session_checkins:
+    if  session_checkins:
         st.dataframe(
             session_checkins,
             use_container_width = True
@@ -437,8 +413,8 @@ elif page == "SESSIONS":
 
         create_button = st.form_submit_button("CREATE SESSION")
 
-        if create_button:
-            if not session_name or not course_id:
+        if  create_button:
+            if  not session_name or not course_id:
                 st.error("session name and course id are required")
             else:
                 new_session = {
@@ -487,7 +463,7 @@ elif page == "CHECK-INS":
 
     filtered_checkins = every_checkin
 
-    if session_filter != "ALL":
+    if  session_filter != "ALL":
         selected_filter_session_id = int(session_filter.split(" - ")[0])
 
         filtered_checkins = [
@@ -496,7 +472,7 @@ elif page == "CHECK-INS":
             if checkin["session_id"] == selected_filter_session_id
         ]
 
-    if status_filter != "ALL":
+    if  status_filter != "ALL":
         filtered_checkins = [
             checkin
             for checkin in filtered_checkins
@@ -505,7 +481,7 @@ elif page == "CHECK-INS":
 
     st.subheader("CHECK-IN RECORDS")
 
-    if filtered_checkins:  # only run this code if anything survived our filters
+    if  filtered_checkins:  # only run this code if anything survived our filters
         st.dataframe(
             filtered_checkins,
             use_container_width = True
@@ -525,7 +501,7 @@ elif page == "CHECK-INS":
         )
 
 
-    if filtered_checkins:
+    if  filtered_checkins:
         st.divider()
 
         st.subheader("CHECK-IN DETAILS")
@@ -600,7 +576,7 @@ elif page == "CHECK-INS":
             )
 
 
-elif page == "AUDIT LOGS":
+elif  page == "AUDIT LOGS":
     st.header("AUDIT LOGS")
 
     # TODO - temp mock data
@@ -673,21 +649,21 @@ elif page == "AUDIT LOGS":
 
     filtered_logs = audit_logs
 
-    if event_filter  != "ALL":
+    if  event_filter  != "ALL":
         filtered_logs = [
             log
             for log in filtered_logs
             if log["event_type"] == event_filter
         ]
 
-    if user_filter   != "ALL":
+    if  user_filter   != "ALL":
         filtered_logs = [
             log
             for log in filtered_logs
             if log["user"] == user_filter
         ]
 
-    if action_filter != "ALL":
+    if  action_filter != "ALL":
         filtered_logs = [
             log
             for log in filtered_logs
@@ -700,13 +676,13 @@ elif page == "AUDIT LOGS":
 
 
     def color_severity(row):
-        if row["severity"] == "ERROR":
+        if  row["severity"] == "ERROR":
             return ["background-color: #FF0000"] * len(row)
 
-        if row["severity"] == "WARNING":
+        if  row["severity"] == "WARNING":
             return ["background-color: #FFA500"] * len(row)
 
-        if row["severity"] == "INFO":
+        if  row["severity"] == "INFO":
             return ["background-color: #0000FF"] * len(row)
 
         return [""] * len(row)  # this is for if we somehow encounter another severity not specified , no color
@@ -727,7 +703,7 @@ elif page == "AUDIT LOGS":
         axis = 1  # this is too apply the function row by row
     )
 
-    if filtered_logs:
+    if  filtered_logs:
         st.dataframe(
             colored_audit_logs,
             use_container_width = True
@@ -737,7 +713,7 @@ elif page == "AUDIT LOGS":
 
 
 
-elif page == "METRICS":
+elif  page == "METRICS":
     st.header("SYSTEM METRICS")
 
     api_requests = 1248
@@ -784,7 +760,7 @@ elif page == "METRICS":
         }
     ]
 
-    if high_risk_alerts:
+    if  high_risk_alerts:
         st.dataframe(high_risk_alerts, use_container_width=True)
     else:
         st.info("no high-risk alerts")

@@ -15,6 +15,7 @@ class APIClient:
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
         self.token = None
+        self.timeout = (5,15)  # 5 seconds to connect and 15 sec waiting for the response daata
 
 
     def set_token(self, token):
@@ -30,7 +31,8 @@ class APIClient:
             json={
                 "email": email,
                 "password": password,
-            }
+            },
+            timeout=self.timeout,
         )
         response.raise_for_status()
 
@@ -38,6 +40,18 @@ class APIClient:
         self.token = data["access_token"]
 
         return data
+
+
+    def logout(self):
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/auth/logout",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+        finally:
+            self.set_token(None)
 
 
     def get(self, endpoint):
@@ -48,7 +62,8 @@ class APIClient:
 
         response = requests.get(
             f"{self.base_url}{endpoint}",
-            headers=headers
+            headers=headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
 
@@ -109,7 +124,8 @@ class APIClient:
         response = requests.post(
             f"{self.base_url}{endpoint}",
             json = data,
-            headers = headers
+            headers = headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
 
@@ -129,7 +145,8 @@ class APIClient:
         response = requests.patch(
             f"{self.base_url}{endpoint}",
             json = data,
-            headers = headers
+            headers = headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
 
@@ -148,7 +165,8 @@ class APIClient:
 
         response = requests.delete(
             f"{self.base_url}{endpoint}",
-            headers = headers
+            headers = headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
 
@@ -167,7 +185,8 @@ class APIClient:
 
         response = requests.get(
             f"{self.base_url}{endpoint}",
-            headers = headers
+            headers = headers,
+            timeout=self.timeout,
         )
         response.raise_for_status()
 
