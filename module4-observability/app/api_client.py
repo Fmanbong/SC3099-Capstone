@@ -1,227 +1,396 @@
+"""Module 4's HTTP boundary: authentication, backend contracts and safe errors."""
+from __future__ import annotations
 
-""" commentary
-- ALL our HTTP details will stay inside here
-    > the Login function has its own post request
-    > the dedicated POST function is for other POST requests
-"""
+import logging
+import math
+import os
+import re
+from contextlib import contextmanager
+from functools import lru_cache
 
 import requests
 
-class APIClient:
 
-    """ our object here is the thing module 4 uses to communicate with module 2
-    """
+@lru_cache(maxsize=1)
+def _tracer():
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").rstrip("/")
+    if not endpoint:
+        return None  # Tracing is optional; attendance does not depend on it.
+    try:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        # Optional monitoring must never block login or attendance requests.
+        logging.getLogger(__name__).warning(
+            "Tracing was configured but its optional packages are unavailable; tracing is disabled."
+        )
+        return None
+    provider = TracerProvider(resource=Resource.create({"service.name": "saiv-module4"}))
+    provider.add_span_processor(BatchSpanProcessor(
+        OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces", timeout=3)
+    ))
+    return provider.get_tracer("saiv.module4")
+
+
+@contextmanager
+def request_span(method, endpoint):
+    tracer = _tracer()
+    if tracer is None:
+        yield None
+        return
+    # UUIDs and query strings are not telemetry attributes.
+    route = re.sub(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", "{id}", endpoint.split("?")[0])
+    with tracer.start_as_current_span(
+        f"{method} {route}", attributes={"http.method": method, "http.route": route},
+        record_exception=False, set_status_on_exception=False,
+    ) as span:
+        yield span
+
+
+class APIError(Exception):
+    """An actionable error that never includes request bodies or credentials."""
+
+    def __init__(self, message, *, status=0, code=None, request_id=None, retry_after=None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.request_id = request_id
+        self.retry_after = retry_after
+
+
+class APIClient:
+    """One client per Streamlit session; tokens remain in server-side memory."""
 
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
         self.token = None
-        self.timeout = (5,15)  # 5 seconds to connect and 15 sec waiting for the response daata
-
+        self.refresh_token = None
+        self.user = None
+        self.timeout = (5, 15)  # Connection timeout, then response-read timeout.
+        self.session = requests.Session()
 
     def set_token(self, token):
-
-        """ token parameter is the JWT returned by module 2 after login
-        """
         self.token = token
 
+    def clear_auth(self):
+        self.token = self.refresh_token = self.user = None
+        self.session.cookies.clear()
+
+    @staticmethod
+    def _error(response):
+        defaults = {
+            401: "Your login has expired. Sign in again.",
+            403: "Your account does not have permission for this action.",
+            404: "The requested record no longer exists.",
+            429: "Too many requests. Wait before trying again.",
+            503: "A required backend service is unavailable.",
+        }
+        message = defaults.get(response.status_code, "The backend could not complete the request.")
+        code = request_id = None
+        try:
+            body = response.json()
+            if isinstance(body, dict):
+                code, request_id = body.get("code"), body.get("request_id")
+                detail = body.get("detail")
+                # The backend's validation messages exclude submitted input.
+                if response.status_code < 500 and isinstance(detail, str):
+                    message = detail[:1200]
+                elif response.status_code == 422 and isinstance(detail, list):
+                    messages = []
+                    for item in detail:
+                        if isinstance(item, dict) and isinstance(item.get("msg"), str):
+                            field = ".".join(str(part) for part in item.get("loc", []) if part != "body")
+                            messages.append(f"{field}: {item['msg']}")
+                    if messages:
+                        message = "; ".join(messages)[:1200]
+        except ValueError:
+            pass  # Never display an upstream HTML error page or raw response body.
+        return APIError(
+            message, status=response.status_code, code=code,
+            request_id=request_id or response.headers.get("X-Request-ID"),
+            retry_after=response.headers.get("Retry-After"),
+        )
+
+    def _request(self, method, endpoint, *, data=None, params=None, authenticated=True,
+                 retry_auth=True, allowed_statuses=()):
+        headers = {}
+        if authenticated and self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        try:
+            # Telemetry records only method/route/status, never headers or payloads.
+            with request_span(method, endpoint) as span:
+                response = self.session.request(
+                    method, f"{self.base_url}{endpoint}", json=data, params=params,
+                    headers=headers, timeout=self.timeout,
+                )
+                if span is not None:
+                    span.set_attribute("http.status_code", response.status_code)
+        except requests.Timeout:
+            raise APIError(
+                "The backend request timed out. For a create, edit or review, "
+                "refresh the records before submitting again; the action may have completed.",
+                code="TIMEOUT",
+            ) from None
+        except requests.RequestException:
+            raise APIError("Cannot reach the backend. Check that it is running.", code="CONNECTION_ERROR") from None
+
+        if response.status_code == 401 and authenticated:
+            if retry_auth and self.refresh_token:
+                self.refresh()
+                # Retry only an explicit 401, never a timeout or an ambiguous failure.
+                return self._request(
+                    method, endpoint, data=data, params=params, authenticated=True,
+                    retry_auth=False, allowed_statuses=allowed_statuses,
+                )
+            self.clear_auth()
+        if not response.ok and response.status_code not in allowed_statuses:
+            raise self._error(response)
+        return response
+
+    @staticmethod
+    def _json(response):
+        if response.status_code == 204 or not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            raise APIError("The backend returned an invalid JSON response.", code="INVALID_RESPONSE") from None
+
+    def _store_tokens(self, data):
+        if not isinstance(data, dict) or not isinstance(data.get("access_token"), str):
+            self.clear_auth()
+            raise APIError("The backend returned an invalid login response.", code="INVALID_RESPONSE")
+        self.token = data["access_token"]
+        self.refresh_token = data.get("refresh_token")
 
     def login(self, email, password):
-        response = requests.post(
-            f"{self.base_url}/api/v1/auth/login",
-            json={
-                "email": email,
-                "password": password,
-            },
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        self.token = data["access_token"]
-
+        self.clear_auth()
+        data = self._json(self._request(
+            "POST", "/api/v1/auth/login", data={"email": email, "password": password},
+            authenticated=False,
+        ))
+        self._store_tokens(data)
+        if not isinstance(data.get("user"), dict):
+            self.clear_auth()
+            raise APIError("The login response has no user profile.", code="INVALID_RESPONSE")
+        self.user = data["user"]
         return data
 
+    def refresh(self):
+        if not self.refresh_token:
+            self.clear_auth()
+            raise APIError("Your login has expired. Sign in again.", status=401)
+        try:
+            data = self._json(self._request(
+                "POST", "/api/v1/auth/refresh", data={"refresh_token": self.refresh_token},
+                authenticated=False,
+            ))
+            # Refresh tokens rotate: keep the new token, never reuse the old one.
+            self._store_tokens(data)
+        except APIError as exc:
+            self.clear_auth()
+            raise APIError("Your login could not be renewed. Sign in again.", status=401,
+                           code=exc.code, request_id=exc.request_id) from None
+        return data
 
     def logout(self):
         try:
-            response = requests.post(
-                f"{self.base_url}/api/v1/auth/logout",
-                headers={"Authorization": f"Bearer {self.token}"},
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
+            if self.token:
+                self._request("POST", "/api/v1/auth/logout")
         finally:
-            self.set_token(None)
+            self.clear_auth()
 
+    def get_current_user(self):
+        self.user = self.get("/api/v1/users/me")
+        return self.user
 
     def get(self, endpoint, params=None):
-        headers = {}
+        return self._json(self._request("GET", endpoint, params=params))
 
-        if  self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+    def post(self, endpoint, data=None):
+        return self._json(self._request("POST", endpoint, data=data))
 
-        response = requests.get(
-            f"{self.base_url}{endpoint}",
-            headers=headers,
-            params=params,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
+    def patch(self, endpoint, data=None):
+        return self._json(self._request("PATCH", endpoint, data=data))
 
-        return response.json()
+    def delete(self, endpoint):
+        return self._request("DELETE", endpoint)
 
+    def download(self, endpoint, params=None):
+        # CSV/binary exports must not be parsed as JSON or regenerated locally.
+        return self._request("GET", endpoint, params=params).content
 
-    def get_courses(self, instructor_id):
-        return self.get(
-            "/api/v1/courses/",
-            params={
-                "instructor_id": instructor_id,
-                "limit": 100,
-            },
-        )
+    @staticmethod
+    def page(data):
+        if (not isinstance(data, dict) or not isinstance(data.get("items"), list)
+                or not isinstance(data.get("total"), int)):
+            raise APIError("The backend returned an invalid paginated response.", code="INVALID_RESPONSE")
+        return data
 
+    def _all_pages(self, endpoint, params=None):
+        rows, offset = [], 0
+        # Fetch selectors completely; never silently hide courses after page one.
+        for _ in range(100):
+            data = self.page(self.get(endpoint, {**(params or {}), "limit": 100, "offset": offset}))
+            rows.extend(data["items"])
+            if len(rows) >= data["total"]:
+                return rows
+            if not data["items"]:
+                break
+            offset += len(data["items"])
+        raise APIError("The full selector list could not be loaded. Try refreshing or use a narrower scope.")
+
+    def get_courses(self, instructor_id=None, limit=100, offset=0):
+        params = {"limit": limit, "offset": offset}
+        if instructor_id is not None:
+            params["instructor_id"] = instructor_id
+        return self.page(self.get("/api/v1/courses/", params))
+
+    def get_all_courses(self, instructor_id=None):
+        params = {"instructor_id": instructor_id} if instructor_id is not None else {}
+        return self._all_pages("/api/v1/courses/", params)
+
+    def get_course(self, course_id):
+        return self.get(f"/api/v1/courses/{course_id}")
+
+    def get_sessions(self, limit=50, offset=0, **filters):
+        return self.page(self.get("/api/v1/sessions/", {"limit": limit, "offset": offset, **filters}))
+
+    def get_all_sessions(self):
+        return self._all_pages("/api/v1/sessions/")
 
     def get_session(self, session_id):
         return self.get(f"/api/v1/sessions/{session_id}")
 
-
-    def get_sessions(self):
-        return self.get("/api/v1/sessions/")
-
-
-    def get_checkin(self, checkin_id):
-        return self.get(f"/api/v1/checkins/{checkin_id}")  # to get authorized detail and verification evidence
-
-
-    def get_checkins(self, status=None, session_id=None, limit=50, offset=0, review_only=False):
-        params = {"limit": limit, "offset": offset}
-
-        if  session_id is not None:
-            params["session_id"] = session_id
-        if  review_only:
-            # includes both flagged and appealed records
-            endpoint = "/api/v1/checkins/flagged"
-        else:
-            endpoint = "/api/v1/checkins/"
-            if  status is not None:
-                params["status"] = status
-        return self.get(endpoint, params=params)
-
-
-    def get_session_checkins(self, session_id):
-        return self.get(f"/api/v1/checkins/session/{session_id}")
-
-
-    def get_flagged_checkins(self):
-        return self.get("/api/v1/checkins/flagged")
-
-
-    def get_overview_stats(self):
-        return self.get("/api/v1/stats/overview")
-
-
-    def get_session_stats(self, session_id):
-        return self.get(f"/api/v1/stats/sessions/{session_id}")
-
-
-    def get_course_stats(self, course_id):
-        return self.get(f"/api/v1/stats/courses/{course_id}")
-
-
-    def get_student_stats(self, student_id):
-        return self.get(f"/api/v1/stats/students/{student_id}")
-
-
-    def get_audit_logs(self):
-        return self.get("/api/v1/audit/")
-
-
-    def post(self, endpoint, data=None):
-
-        """ data parameter is the information we are sending to the backend , however ,
-        it is optional
-        """
-
-        headers = {}
-
-        if  self.token:
-            headers["authorization"] = f"bearer {self.token}"  # TODO - not sure what this does
-
-        response = requests.post(
-            f"{self.base_url}{endpoint}",
-            json = data,
-            headers = headers,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-
-        return response.json()
-
-
     def create_session(self, data):
         return self.post("/api/v1/sessions/", data)
-
-
-    def patch(self, endpoint, data=None):
-        headers = {}
-
-        if  self.token:
-            headers["authorization"] = f"bearer {self.token}"
-
-        response = requests.patch(
-            f"{self.base_url}{endpoint}",
-            json = data,
-            headers = headers,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-
-        return response.json()
-
 
     def update_session(self, session_id, data):
         return self.patch(f"/api/v1/sessions/{session_id}", data)
 
-
-    def delete(self, endpoint):
-        headers = {}
-
-        if  self.token:
-            headers["authorization"] = f"bearer {self.token}"
-
-        response = requests.delete(
-            f"{self.base_url}{endpoint}",
-            headers = headers,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-
-        return response
-
-
     def delete_session(self, session_id):
         return self.delete(f"/api/v1/sessions/{session_id}")
 
+    def get_checkins(self, status=None, session_id=None, limit=50, offset=0,
+                     review_only=False, **filters):
+        params = {"limit": limit, "offset": offset, **filters}
+        if session_id is not None:
+            params["session_id"] = session_id
+        if review_only:
+            endpoint = "/api/v1/checkins/flagged"
+        else:
+            endpoint = "/api/v1/checkins/"
+            if status is not None:
+                params["status"] = status
+        return self.page(self.get(endpoint, params))
 
-    def download(self, endpoint):
-        headers = {}
+    def get_checkin(self, checkin_id):
+        return self.get(f"/api/v1/checkins/{checkin_id}")
 
-        if  self.token:
-            headers["authorization"] = f"bearer {self.token}"
+    def get_session_checkins(self, session_id):
+        data = self.get(f"/api/v1/checkins/session/{session_id}")
+        if not isinstance(data, list):
+            raise APIError("The backend returned an invalid session check-in list.")
+        return data
 
-        response = requests.get(
-            f"{self.base_url}{endpoint}",
-            headers = headers,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
+    def get_flagged_checkins(self, **filters):
+        return self.get_checkins(review_only=True, **filters)
 
-        return response.content  # we want the actual bytes of the response if we using CSV
+    def review_checkin(self, checkin_id, status, review_notes):
+        return self.post(f"/api/v1/checkins/{checkin_id}/review",
+                         {"status": status, "review_notes": review_notes})
 
+    def get_overview_stats(self, course_id=None, days=7):
+        params = {"days": days}
+        if course_id is not None:
+            params["course_id"] = course_id
+        return self.get("/api/v1/stats/overview", params)
 
-    def export_attendance(self, course_id):
-        return self.download(f"/api/v1/export/attendance/{course_id}")
+    def get_session_stats(self, session_id):
+        return self.get(f"/api/v1/stats/sessions/{session_id}")
 
+    def get_course_stats(self, course_id, **filters):
+        return self.get(f"/api/v1/stats/courses/{course_id}", filters)
+
+    def get_student_stats(self, student_id):
+        return self.get(f"/api/v1/stats/students/{student_id}")
+
+    def get_audit_logs(self, limit=100, offset=0, **filters):
+        return self.page(self.get("/api/v1/audit/", {"limit": limit, "offset": offset, **filters}))
+
+    def get_audit_summary(self, days=7):
+        return self.get("/api/v1/audit/summary", {"days": days})
+
+    def export_attendance(self, course_id, **filters):
+        return self.download(f"/api/v1/export/attendance/{course_id}", {"format": "csv", **filters})
 
     def export_session(self, session_id):
-        return self.download(f"/api/v1/export/session/{session_id}")
+        return self.download(f"/api/v1/export/session/{session_id}", {"format": "csv"})
+
+    def get_health(self):
+        # A 503 still has useful component states; never call it healthy.
+        response = self._request("GET", "/health", authenticated=False, allowed_statuses=(503,))
+        data = self._json(response)
+        if not isinstance(data, dict):
+            raise APIError("The health endpoint returned invalid data.")
+        return data
+
+
+# Prometheus is a read-only monitoring service, separate from Module 2 login.
+# Use actual Module 2 metric names and exclude monitoring probes from traffic.
+TRAFFIC = 'saiv_http_requests_total{job="saiv-backend",path!~"/metrics|/health"}'
+DURATION = 'saiv_http_request_duration_seconds_bucket{job="saiv-backend",path!~"/metrics|/health"}'
+QUERIES = {
+    "Requests / second": f"sum(rate({TRAFFIC}[5m]))",
+    "Successful responses (%)": (
+        '100 * sum(rate(saiv_http_requests_total{job="saiv-backend",'
+        'path!~"/metrics|/health",status=~"2..|3.."}[5m])) / '
+        f"sum(rate({TRAFFIC}[5m]))"
+    ),
+    "Error responses (%)": (
+        '100 * sum(rate(saiv_http_requests_total{job="saiv-backend",'
+        'path!~"/metrics|/health",status=~"4..|5.."}[5m])) / '
+        f"sum(rate({TRAFFIC}[5m]))"
+    ),
+    "Response p95 (ms)": f"1000 * histogram_quantile(0.95, sum by (le) (rate({DURATION}[5m])))",
+}
+
+
+class PrometheusClient:
+    def __init__(self, base_url):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = (3, 8)
+
+    def _get(self, path, params=None):
+        try:
+            response = requests.get(f"{self.base_url}{path}", params=params, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError):
+            raise APIError("Prometheus is unavailable. Attendance pages can still be used.") from None
+        if not isinstance(data, dict) or data.get("status") != "success":
+            raise APIError("Prometheus returned an invalid query result.")
+        return data.get("data", {})
+
+    def scalar(self, query):
+        data = self._get("/api/v1/query", {"query": query})
+        values = data.get("result", [])
+        if not values:
+            return None
+        try:
+            value = float(values[0]["value"][1])
+        except (ValueError, TypeError, KeyError, IndexError):
+            raise APIError("Prometheus returned an invalid metric value.") from None
+        return value if math.isfinite(value) else None
+
+    def targets(self):
+        data = self._get("/api/v1/targets", {"state": "active"})
+        return [
+            {"Job": item.get("labels", {}).get("job", "Unknown"),
+             "Health": item.get("health", "unknown"),
+             "Last scrape": item.get("lastScrape"),
+             "Error": item.get("lastError", "")}
+            for item in data.get("activeTargets", [])
+        ]
