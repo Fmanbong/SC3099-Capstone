@@ -1,118 +1,94 @@
 
 {
-	"uid": "saiv-operations",
-	"title": "SAIV Backend Operations",
+	"uid":          "saiv-operations",
+	"title":        "SAIV Backend Operations",
 	"schemaVersion": 39,
-	"version": 1,
-	"editable": false,
-	"tags": ["saiv", "module4"],
-	"timezone": "browser",
-	"refresh": "30s",
+	"version":       1,
+	"editable":      false,
+	"tags":        ["saiv", "module4"],
+	"timezone":     "browser",
+	"refresh":      "30s",
 	"time": {
 		"from": "now-1h",
-		"to": "now"
+		"to":   "now"
 	},
+
 	"panels": [
 	{
-		"id": 1,
-		"type": "timeseries",
-		"title": "Backend scrape available",
-		"gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-		"datasource": {
-			"type": "prometheus",
-			"uid": "saiv-prometheus"
-		},
+		"id":           1,
+		"type":        "timeseries",
+		"title":       "Backend scrape available",
+		"gridPos":    {"h": 8, "w": 12, "x": 0, "y": 0},
+		"datasource": {"type": "prometheus" , "uid":  "saiv-prometheus"},
 		"targets": [
 			{
 				"expr": "up{job=\"saiv-backend\"}",
 				"refId": "A"
 			}
 		],
-		"fieldConfig": {
-			"defaults": {"unit": "short"},
-			"overrides": []
-		}
+		"fieldConfig": {"defaults": {"unit": "short"} , "overrides": []}
 	},
+
 	{
-		"id": 2,
-		"type": "timeseries",
-		"title": "Requests / second",
-		"gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-		"datasource": {
-			"type": "prometheus",
-			"uid": "saiv-prometheus"
-		},
+		"id":           2,
+		"type":        "timeseries",
+		"title":       "Requests / second",
+		"gridPos":    {"h": 8, "w": 12, "x": 12, "y": 0},
+		"datasource": {"type": "prometheus" , "uid":  "saiv-prometheus"},
 		"targets": [
 			{
 				"expr": "sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
 				"refId": "A"
 			}
 		],
-		"fieldConfig": {
-			"defaults": {"unit": "reqps"},
-			"overrides": []
-		}
+		"fieldConfig": {"defaults": {"unit": "reqps"} , "overrides": []}
 	},
+
 	{
-		"id": 3,
-		"type": "timeseries",
-		"title": "Successful responses (%)",
-		"gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-		"datasource": {
-			"type": "prometheus",
-			"uid": "saiv-prometheus"
-		},
+		"id":           3,
+		"type":        "timeseries",
+		"title":       "Successful responses (%)",
+		"gridPos":    {"h": 8, "w": 12, "x": 0, "y": 8},
+		"datasource": {"type": "prometheus" , "uid": "saiv-prometheus"},
 		"targets": [
 			{
 				"expr": "100 * sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\",status=~\"2..|3..\"}[5m])) / sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
 				"refId": "A"
 			}
 		],
-		"fieldConfig": {
-			"defaults": {"unit": "percent"},
-			"overrides": []
-		}
+		"fieldConfig": {"defaults": {"unit": "percent"} , "overrides": []}
 	},
+
 	{
-		"id": 4,
-		"type": "timeseries",
-		"title": "Error responses (%)",
-		"gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-		"datasource": {
-			"type": "prometheus",
-			"uid": "saiv-prometheus"
-		},
+		"id":           4,
+		"type":        "timeseries",
+		"title":       "Error responses (%)",
+		"gridPos":    {"h": 8, "w": 12, "x": 12, "y": 8},
+		"datasource": {"type": "prometheus" , "uid": "saiv-prometheus"},
 		"targets": [
 			{
 				"expr": "100 * sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\",status=~\"4..|5..\"}[5m])) / sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
 				"refId": "A"
 			}
 		],
-		"fieldConfig": {
-			"defaults": {"unit": "percent"},
-			"overrides": []
-		}
+		"fieldConfig": {"defaults": {"unit": "percent"} , "overrides": []}
 	},
+
 	{
-		"id": 5,
-		"type": "timeseries",
-		"title": "Response p95 (ms)",
-		"gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
-		"datasource": {
-			"type": "prometheus",
-			"uid": "saiv-prometheus"
-		},
+		"id":           5,
+		"type":        "timeseries",
+		"title":       "Response p95 (ms)",
+		"gridPos":    {"h": 8, "w": 12, "x": 0, "y": 16},
+		"datasource": {"type": "prometheus" , "uid": "saiv-prometheus"},
 		"targets": [
 			{
 				"expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(saiv_http_request_duration_seconds_bucket{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m])))",
 				"refId": "A"
 			}
 		],
-		"fieldConfig": {
-			"defaults": {"unit": "ms"},
-			"overrides": []
-		}
+		"fieldConfig": {"defaults": {"unit": "ms"} , "overrides": []}
 	}
+
 	],
 	"description": "Actual Module 2 HTTP metrics. No student identities or biometric data are sent to Prometheus."
 }
