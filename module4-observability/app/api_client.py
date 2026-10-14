@@ -4,7 +4,7 @@
 """
 
 import logging , math , os , re , requests
-from contextlib import contextmanager ; from functools import lru_cache ; from __future__ import annotation
+from contextlib import contextmanager ; from functools import lru_cache
 
 @lru_cache(maxsize=1)
 def _tracer():
@@ -92,12 +92,12 @@ class APIClient:
                      message  = detail[:1200]
                 elif response.status_code == 422 and isinstance(detail, list):
                      messages = []
-                    for item in detail:
-                        if  isinstance(item, dict) and isinstance(item.get("msg"), str):
-                            field = ".".join(str(part) for part in item.get("loc", []) if part != "body")
-                            messages.append(f"{field}: {item['msg']}")
-                    if  messages:
-                        message = "; ".join(messages)[:1200]
+                     for item in detail:
+                         if  isinstance(item, dict) and isinstance(item.get("msg"), str):
+                             field = ".".join(str(part) for part in item.get("loc", []) if part != "body")
+                             messages.append(f"{field}: {item['msg']}")
+                     if  messages:
+                         message = "; ".join(messages)[:1200]
         except ValueError:
             pass  # do not display upstream HTML error or raw response
         return APIError(
@@ -116,8 +116,8 @@ class APIClient:
                  response = self.session.request(
                     method, f"{self.base_url}{endpoint}", json=data, params=params, headers=headers, timeout=self.timeout,
                 )
-                if  span is not None:
-                    span.set_attribute("http.status_code", response.status_code)
+                 if  span is not None:
+                     span.set_attribute("http.status_code", response.status_code)
         except requests.Timeout:
             raise APIError(
                 "the backend request timed out. for the create , edit or review , "
