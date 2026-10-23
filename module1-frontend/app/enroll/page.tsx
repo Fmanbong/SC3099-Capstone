@@ -31,6 +31,7 @@ function EnrollFlow() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [reenrolling, setReenrolling] = useState(false)
 
   // Checked before `face_enrolled` below: a successful enrollment sets both,
   // and the user should see the confirmation with the button to check in.
@@ -44,12 +45,20 @@ function EnrollFlow() {
     )
   }
 
-  if (user?.face_enrolled) {
+  if (user?.face_enrolled && !reenrolling) {
     return (
       <EnrolledCard title="Your face is already enrolled">
         <p className="text-sm text-slate-600">
           You&apos;re all set for check-ins that require face verification.
         </p>
+        {/* Matching works best when enrollment looks like a check-in, e.g. glasses on or off. */}
+        <p className="text-sm text-slate-500">
+          Changed your look (glasses, hairstyle) or keep getting flagged? Re-enroll to replace your
+          saved face.
+        </p>
+        <button onClick={() => setReenrolling(true)} className="btn btn-secondary w-full">
+          Re-enroll face
+        </button>
       </EnrolledCard>
     )
   }
@@ -85,7 +94,11 @@ function EnrollFlow() {
       {error && <Alert type="error">{error}</Alert>}
       <div className="card space-y-4 p-5">
         <CameraCapture
-          instructions="Center your face in frame with good lighting, then capture."
+          instructions={
+            reenrolling
+              ? 'Look the way you usually do when checking in (glasses on or off), center your face with good lighting, then capture.'
+              : 'Center your face in frame with good lighting, then capture.'
+          }
           onCapture={async (image) => {
             setSubmitting(true)
             setError(null)

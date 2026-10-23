@@ -445,6 +445,6 @@ def test_failed_face_match_is_rejected_not_flagged():
 
 
 def test_review_band_follows_face_service_threshold():
-    assert face_match_uncertain(_face(0.93, threshold=0.90))
-    assert not face_match_uncertain(_face(0.93, threshold=0.85))
+    assert face_match_uncertain(_face(0.91, threshold=0.90))
+    assert not face_match_uncertain(_face(0.91, threshold=0.85))
     assert not face_match_uncertain(None)

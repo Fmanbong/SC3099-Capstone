@@ -28,9 +28,10 @@ SIGNAL_WEIGHTS = {
 }
 
 # A face match that passes by less than this margin over Module 3's threshold is
-# too close to call: different people have been measured just above it, so such
-# check-ins go to instructor review instead of being auto-approved.
-FACE_REVIEW_MARGIN = 0.05
+# too close to call: different people have been measured at 0.856-0.863, so such
+# check-ins go to instructor review instead of being auto-approved. Genuine
+# faces measured as low as 0.871, so a wider margin flagged them too often.
+FACE_REVIEW_MARGIN = 0.02
 
 
 def face_match_uncertain(face_result: dict[str, Any] | None) -> bool:
