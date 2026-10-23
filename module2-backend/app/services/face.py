@@ -60,12 +60,16 @@ class FaceServiceClient:
             self._malformed()
         return data
 
-    def liveness(self, image: str, challenge_type: str = "passive") -> dict[str, Any]:
+    def liveness(
+        self, image: str, challenge_type: str = "passive", *, frames: list[str] | None = None
+    ) -> dict[str, Any]:
         self._validate_image(image)
-        data = self._request(
-            "/liveness/check",
-            {"challenge_response": image, "challenge_type": challenge_type},
-        )
+        payload: dict[str, Any] = {"challenge_response": image, "challenge_type": challenge_type}
+        if frames:
+            for frame in frames:
+                self._validate_image(frame)
+            payload["frames"] = frames
+        data = self._request("/liveness/check", payload)
         self._require_bool(data, "liveness_passed")
         self._require_score(data, "liveness_score")
         self._require_score(data, "liveness_threshold")

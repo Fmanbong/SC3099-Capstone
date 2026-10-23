@@ -24,6 +24,7 @@ Privacy design:
 import base64
 import io
 import ipaddress
+import logging
 from typing import Optional, Dict, List, Any, Tuple
 
 import numpy as np
@@ -35,6 +36,11 @@ import face_recognition
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from app.antispoof import detect_presentation_attack
+
+# Uvicorn's logger is the one configured to print inside the container.
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(
     title="SAIV Face Recognition Service",
@@ -56,6 +62,17 @@ app.add_middleware(
 
 FACE_MATCH_THRESHOLD = 0.85
 LIVENESS_THRESHOLD = 0.60
+SPOOF_LIVENESS_CAP = 0.20          # liveness score ceiling once a presentation attack is detected
+
+# Active challenge across a short frame sequence: a photo or a still screen
+# cannot blink or turn its head. Thresholds are deliberately loose so that a
+# real attempt passes; a static picture barely moves these numbers at all.
+MAX_CHALLENGE_FRAMES = 12
+MIN_CHALLENGE_FRAMES = 4
+BLINK_MAX_EAR_RATIO = 0.70         # eyes must close to <= 70% of their open aspect ratio
+HEAD_TURN_MIN_YAW_RANGE = 0.20     # nose offset / eye distance must swing this much
+CHALLENGE_SAME_FACE_MIN = FACE_MATCH_THRESHOLD  # first vs last frame must be the same person (different people ~0.77)
+CHALLENGE_FAIL_CAP = 0.30          # liveness score ceiling when the challenge was not performed
 RISK_THRESHOLD = 0.50
 MIN_DETECTION_CONFIDENCE = 0.5
 
@@ -120,6 +137,9 @@ class FaceVerifyResponse(BaseModel):
 class LivenessRequest(BaseModel):
     challenge_response: str
     challenge_type: str = "blink"
+    # Optional sequence recorded while the user performs a blink/head_turn
+    # challenge. Without it, only the single challenge_response frame is judged.
+    frames: Optional[List[str]] = None
 
 
 class LivenessResponse(BaseModel):
@@ -295,7 +315,8 @@ def analyze_face_mesh(image_rgb: np.ndarray) -> Optional[Dict[str, Any]]:
     right_eye_center = pts[RIGHT_EYE_EAR_IDX].mean(axis=0)
     eye_midpoint_x = (left_eye_center[0] + right_eye_center[0]) / 2.0
     interocular = abs(right_eye_center[0] - left_eye_center[0]) + 1e-6
-    yaw_ratio = abs(pts[NOSE_TIP][0] - eye_midpoint_x) / interocular
+    yaw_signed = (pts[NOSE_TIP][0] - eye_midpoint_x) / interocular
+    yaw_ratio = abs(yaw_signed)
 
     return {
         "face_mesh_complete": len(pts) >= 468,
@@ -305,6 +326,7 @@ def analyze_face_mesh(image_rgb: np.ndarray) -> Optional[Dict[str, Any]]:
         "depth_quality": depth_quality,
         "eye_aspect_ratio": float(avg_ear),
         "yaw_ratio": float(yaw_ratio),
+        "yaw_signed": float(yaw_signed),
     }
 
 
@@ -318,6 +340,54 @@ def eye_aspect_ratio(pts: np.ndarray, idx: List[int]) -> float:
     vertical_2 = np.linalg.norm(p[2] - p[4])
     horizontal = np.linalg.norm(p[0] - p[3]) + 1e-6
     return float((vertical_1 + vertical_2) / (2.0 * horizontal))
+
+
+def analyze_challenge(frames: List[str], challenge_type: str) -> Dict[str, Any]:
+    """Check that a frame sequence shows the requested blink or head turn by one person."""
+    if len(frames) > MAX_CHALLENGE_FRAMES:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_CHALLENGE_FRAMES} frames are accepted")
+    ears: List[float] = []
+    yaws: List[float] = []
+    hashes: List[str] = []
+    signals: set = set()
+    for index, frame in enumerate(frames):
+        frame_rgb = decode_base64_image(frame)
+        bbox_css, _ = detect_face(frame_rgb)
+        if bbox_css is None:
+            continue
+        mesh = analyze_face_mesh(frame_rgb)
+        if mesh is not None:
+            ears.append(mesh["eye_aspect_ratio"])
+            yaws.append(mesh["yaw_signed"])
+        top, right, bottom, left = bbox_css
+        signals.update(detect_presentation_attack(frame_rgb, (left, top, right - left, bottom - top))[0])
+        # Identity continuity: the first and last frames are both near-frontal.
+        if index in (0, len(frames) - 1):
+            embedding = extract_face_embedding(frame_rgb, bbox_css)
+            if embedding is not None:
+                hashes.append(generate_face_hash(embedding))
+                del embedding
+        del frame_rgb
+
+    result: Dict[str, Any] = {"type": challenge_type, "frames": len(frames), "faces_tracked": len(ears),
+                              "attack_signals": sorted(signals), "passed": False}
+    if len(ears) < max(MIN_CHALLENGE_FRAMES, int(0.7 * len(frames))):
+        result["reason"] = "face_not_tracked"
+        return result
+    if len(hashes) == 2:
+        result["same_face_score"] = round(hamming_match_score(hashes[0], hashes[1]), 3)
+        if result["same_face_score"] < CHALLENGE_SAME_FACE_MIN:
+            result["reason"] = "face_changed"
+            return result
+    if challenge_type == "blink":
+        result["ear_ratio"] = round(min(ears) / (max(ears) + 1e-6), 3)
+        result["passed"] = result["ear_ratio"] <= BLINK_MAX_EAR_RATIO
+    elif challenge_type == "head_turn":
+        result["yaw_range"] = round(max(yaws) - min(yaws), 3)
+        result["passed"] = result["yaw_range"] >= HEAD_TURN_MIN_YAW_RANGE
+    if not result["passed"]:
+        result["reason"] = "challenge_not_performed"
+    return result
 
 
 def detect_vpn_proxy(ip_address: Optional[str], user_agent: Optional[str]) -> Tuple[bool, float]:
@@ -475,6 +545,10 @@ async def check_liveness(request: LivenessRequest):
     mesh_info = analyze_face_mesh(image_rgb)
     embedding = extract_face_embedding(image_rgb, bbox_css)
     face_hash = generate_face_hash(embedding) if embedding is not None else ""
+    top, right, bottom, left = bbox_css
+    attack_signals, attack_measurements = detect_presentation_attack(
+        image_rgb, (left, top, right - left, bottom - top)
+    )
     del image_rgb
     if embedding is not None:
         del embedding
@@ -516,6 +590,29 @@ async def check_liveness(request: LivenessRequest):
         }
 
     liveness_score = min(max(liveness_score, 0.0), 1.0)
+
+    if request.frames and request.challenge_type in ("blink", "head_turn"):
+        challenge = analyze_challenge(request.frames, request.challenge_type)
+        details["challenge"] = challenge
+        attack_signals = sorted(set(attack_signals) | set(challenge["attack_signals"]))
+        if challenge["passed"]:
+            if mesh_info is not None:
+                # The sequence proves the challenge, so it earns full challenge credit.
+                liveness_score = round(0.35 * detection_component + 0.40 * depth_component + 0.25, 3)
+        else:
+            liveness_score = min(liveness_score, CHALLENGE_FAIL_CAP)
+            details["reason"] = challenge.get("reason", "challenge_not_performed")
+        logger.info("liveness challenge=%s", {k: v for k, v in challenge.items() if k != "attack_signals"})
+
+    # FaceMesh depth is inferred from the 2D picture, so a photo of a face
+    # scores "good" depth too; physical evidence of a print or screen overrides it.
+    details["attack_signals"] = attack_signals
+    details["attack_measurements"] = attack_measurements
+    if attack_signals:
+        liveness_score = min(liveness_score, SPOOF_LIVENESS_CAP)
+        details["reason"] = "presentation_attack_detected"
+    # Aggregate image statistics only (no pixels), for tuning detector thresholds.
+    logger.info("liveness attack_signals=%s measurements=%s", attack_signals, attack_measurements)
 
     return LivenessResponse(
         liveness_passed=liveness_score >= LIVENESS_THRESHOLD,

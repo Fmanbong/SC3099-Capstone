@@ -43,6 +43,9 @@ export interface Session {
   require_face_match?: boolean
 }
 
+/** Active liveness challenge the student performs on camera; a photo can do neither. */
+export type LivenessChallenge = 'blink' | 'head_turn'
+
 export interface Course {
   id: string
   code: string

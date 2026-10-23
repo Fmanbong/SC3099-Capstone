@@ -35,7 +35,7 @@ export function stopStream(stream: MediaStream | null) {
 }
 
 /** Captures the current frame of a playing <video> element as base64 JPEG (no data-URL prefix). */
-export function captureFrame(video: HTMLVideoElement): string {
+export function captureFrame(video: HTMLVideoElement, quality = 0.9): string {
   // A <video> with no frame yet reports 0x0 and would yield an empty image.
   if (!video.videoWidth || !video.videoHeight) throw new Error('Camera is not ready')
   const canvas = document.createElement('canvas')
@@ -44,6 +44,26 @@ export function captureFrame(video: HTMLVideoElement): string {
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas not supported')
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+  const dataUrl = canvas.toDataURL('image/jpeg', quality)
   return dataUrl.replace(/^data:image\/\w+;base64,/, '')
+}
+
+/**
+ * Records `count` frames, `intervalMs` apart, for a liveness challenge. Frames
+ * use slightly lower JPEG quality so the whole sequence stays around 1 MB.
+ * Stops early (returning what it has) if the <video> element goes away.
+ */
+export async function recordFrames(
+  getVideo: () => HTMLVideoElement | null,
+  count: number,
+  intervalMs: number,
+): Promise<string[]> {
+  const frames: string[] = []
+  for (let i = 0; i < count; i++) {
+    const video = getVideo()
+    if (!video) break
+    frames.push(captureFrame(video, 0.8))
+    if (i < count - 1) await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  return frames
 }

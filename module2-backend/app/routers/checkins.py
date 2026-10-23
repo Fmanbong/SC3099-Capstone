@@ -3,12 +3,12 @@ from __future__ import annotations
 import html
 import secrets
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import AwareDatetime, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DatabaseSession
 
@@ -41,6 +41,11 @@ class SubmitCheckIn(CleanModel):
     liveness_challenge_response: str | None = Field(default=None, min_length=1, max_length=7 * 1024 * 1024)
     face_image: str | None = Field(default=None, min_length=1, max_length=7 * 1024 * 1024)
     liveness_challenge_type: Literal["passive", "blink", "head_turn"] = "passive"
+    # Short sequence recorded while the student performs the blink/head_turn
+    # challenge; forwarded to Module 3, never stored.
+    liveness_frames: list[Annotated[str, Field(min_length=1, max_length=1024 * 1024)]] | None = Field(
+        default=None, min_length=1, max_length=12
+    )
     qr_code: str | None = Field(default=None, max_length=512)
     device_challenge_id: UUID | None = None
     device_signature: str | None = Field(default=None, min_length=1, max_length=8192)
@@ -58,6 +63,13 @@ class AppealCheckIn(CleanModel):
         return html.escape(value, quote=True)
 
 
+def _clean_notes(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("Review notes must not be blank")
+    return html.escape(value, quote=True)
+
+
 class ReviewCheckIn(CleanModel):
     status: Literal["approved", "rejected"]
     review_notes: str = Field(min_length=1, max_length=2000)
@@ -65,10 +77,16 @@ class ReviewCheckIn(CleanModel):
     @field_validator("review_notes")
     @classmethod
     def clean_notes(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Review notes must not be blank")
-        return html.escape(value, quote=True)
+        return _clean_notes(value)
+
+
+class ReverifyCheckIn(CleanModel):
+    review_notes: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("review_notes")
+    @classmethod
+    def clean_notes(cls, value: str) -> str:
+        return _clean_notes(value)
 
 
 def _checkin_or_404(db: DatabaseSession, checkin_id: str) -> CheckIn:
@@ -125,10 +143,13 @@ def submit_checkin(
     )
     if enrollment is None:
         raise ApiError(403, "Active enrollment is required", "ENROLLMENT_REQUIRED")
-    if db.scalar(select(CheckIn.id).where(CheckIn.session_id == session.id, CheckIn.student_id == user.id)):
+    # One check-in per student and session, except that staff can send a
+    # flagged check-in back as "pending" for the student to redo live.
+    existing = db.scalar(select(CheckIn).where(CheckIn.session_id == session.id, CheckIn.student_id == user.id))
+    if existing is not None and existing.status != "pending":
         raise ApiError(400, "You have already checked in to this session", "CHECKIN_EXISTS")
 
-    image = body.face_image or body.liveness_challenge_response
+    image = body.face_image or body.liveness_challenge_response or (body.liveness_frames or [None])[0]
     liveness_required = bool(session.require_liveness_check)
     face_required = bool(session.require_face_match or course.require_face_recognition)
     factors: list[dict] = []
@@ -236,8 +257,15 @@ def submit_checkin(
     liveness_result = None
     face_result = None
     processed_image = bool(image and user.camera_consent)
-    if processed_image and (liveness_required or body.liveness_challenge_response):
-        liveness_result = request.app.state.face_client.liveness(image, body.liveness_challenge_type)
+    # Every processed image is screened for presentation attacks, including a
+    # face_image sent only for matching: a photo of the right person still matches.
+    if processed_image:
+        if body.liveness_frames:
+            liveness_result = request.app.state.face_client.liveness(
+                image, body.liveness_challenge_type, frames=body.liveness_frames
+            )
+        else:
+            liveness_result = request.app.state.face_client.liveness(image, body.liveness_challenge_type)
         if not liveness_result["liveness_passed"]:
             factors.append(
                 factor(
@@ -315,9 +343,7 @@ def submit_checkin(
         template_hash = face_result.get("current_template_hash") or None
     elif liveness_result:
         template_hash = liveness_result.get("face_embedding_hash") or None
-    checkin = CheckIn(
-        session_id=session.id,
-        student_id=user.id,
+    evidence = dict(
         device_id=device.id if device else None,
         status=checkin_status,
         checked_in_at=now,
@@ -337,12 +363,24 @@ def submit_checkin(
         qr_code_verified=qr_verified,
         scheduled_deletion_at=now + timedelta(days=settings.retention_days),
     )
-    db.add(checkin)
-    try:
+    if existing is None:
+        checkin = CheckIn(session_id=session.id, student_id=user.id, **evidence)
+        db.add(checkin)
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            db.rollback()
+            raise ApiError(400, "You have already checked in to this session", "CHECKIN_EXISTS") from exc
+    else:
+        # The redo replaces the earlier evidence and is a fresh decision the
+        # student may appeal; the earlier result stays in the audit log.
+        checkin = existing
+        for key, value in evidence.items():
+            setattr(checkin, key, value)
+        checkin.reviewed_by_id = checkin.reviewed_at = None
+        checkin.appeal_reason = checkin.appealed_at = None
+        db.execute(delete(RiskSignal).where(RiskSignal.checkin_id == checkin.id))
         db.flush()
-    except IntegrityError as exc:
-        db.rollback()
-        raise ApiError(400, "You have already checked in to this session", "CHECKIN_EXISTS") from exc
     for item in factors:
         db.add(
             RiskSignal(
@@ -359,7 +397,7 @@ def submit_checkin(
         user_id=user.id,
         resource_type="checkin",
         resource_id=checkin.id,
-        details={"session_id": session.id},
+        details={"session_id": session.id, "reverification": existing is not None},
         request=request,
     )
     audit_event(
@@ -558,5 +596,49 @@ def review_checkin(
         details={"status": body.status},
         request=request,
     )
+    db.commit()
+    return checkin_data(checkin, db)
+
+
+@router.post("/{checkin_id}/reverify")
+def request_reverification(
+    checkin_id: UUID,
+    body: ReverifyCheckIn,
+    request: Request,
+    db: DatabaseSession = Depends(get_db),
+    user=Depends(require_roles("admin", "instructor", "ta")),
+):
+    """Send an uncertain check-in back to the student to redo live.
+
+    No face image is kept for staff to compare, so the remedy for a doubtful
+    match is fresh live evidence. The check-in becomes "pending" (not attended)
+    until the student submits again while the session's window is open.
+    """
+    checkin = _checkin_or_404(db, str(checkin_id))
+    session, _ = _session_course(db, checkin.session_id)
+    ensure_course_access(db, user, session.course_id)
+    if checkin.status not in {"flagged", "appealed"}:
+        raise ApiError(400, "Only flagged or appealed check-ins may be re-verified", "REVERIFY_NOT_ALLOWED")
+    # The audit log is append-only, so the evidence being replaced survives here.
+    audit_event(
+        db,
+        "checkin_reverify_requested",
+        user_id=user.id,
+        resource_type="checkin",
+        resource_id=checkin.id,
+        details={
+            "previous_status": checkin.status,
+            "previous_risk_score": checkin.risk_score,
+            "previous_face_match_score": checkin.face_match_score,
+            "previous_risk_factors": [item["type"] for item in checkin.risk_factors or []],
+        },
+        request=request,
+        severity="warning",
+    )
+    checkin.status = "pending"
+    checkin.review_notes = body.review_notes
+    checkin.reviewed_by_id = user.id
+    checkin.reviewed_at = utcnow()
+    checkin.verified_at = None
     db.commit()
     return checkin_data(checkin, db)

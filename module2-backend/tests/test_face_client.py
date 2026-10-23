@@ -64,6 +64,23 @@ def test_face_client_uses_module3_paths_and_payloads():
     ]
 
 
+def test_face_client_forwards_challenge_frames_after_validating_each():
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"liveness_passed": False, "liveness_score": 0.3, "liveness_threshold": 0.6,
+                                         "face_embedding_hash": "", "details": {}})
+
+    client = make_client(handler)
+    client.liveness(IMAGE, "head_turn", frames=[IMAGE, IMAGE])
+    assert sent == [{"challenge_response": IMAGE, "challenge_type": "head_turn", "frames": [IMAGE, IMAGE]}]
+    with pytest.raises(ApiError) as exc:
+        client.liveness(IMAGE, "blink", frames=[IMAGE, "not base64!"])
+    assert exc.value.status_code == 400
+    assert len(sent) == 1
+
+
 @pytest.mark.parametrize(
     "response",
     [

@@ -24,7 +24,14 @@ import { api, extractErrorMessage } from '@/lib/api'
 import { getCurrentPosition, GeolocationError, type GeoResult } from '@/lib/geolocation'
 import { createDeviceProof, getDeviceIdentity } from '@/lib/device'
 import { displayText } from '@/lib/text'
-import type { CheckinHistoryItem, CheckinResult, Course, Enrollment, Session } from '@/lib/types'
+import type {
+  CheckinHistoryItem,
+  CheckinResult,
+  Course,
+  Enrollment,
+  LivenessChallenge,
+  Session,
+} from '@/lib/types'
 
 type Step =
   | 'loading'
@@ -45,6 +52,11 @@ function timeRemaining(closesAt?: string): string {
 }
 
 const flowSteps = ['Photo', 'Location', 'Done']
+
+/** Picks the challenge only when the session is chosen, so it can't be pre-recorded for. */
+function pickChallenge(): LivenessChallenge {
+  return crypto.getRandomValues(new Uint8Array(1))[0] % 2 === 0 ? 'blink' : 'head_turn'
+}
 
 /** Progress bar for the check-in flow. `current` is the index of the step in progress. */
 function StepIndicator({ current }: { current: number }) {
@@ -150,9 +162,12 @@ function CheckinFlow() {
   const [step, setStep] = useState<Step>('loading')
   const [sessions, setSessions] = useState<Session[]>([])
   const [checkedInSessionIds, setCheckedInSessionIds] = useState<Set<string>>(new Set())
+  const [recheckSessionIds, setRecheckSessionIds] = useState<Set<string>>(new Set())
   const [faceRequiredCourseIds, setFaceRequiredCourseIds] = useState<Set<string>>(new Set())
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
+  const [challenge, setChallenge] = useState<LivenessChallenge>('blink')
+  const [capturedFrames, setCapturedFrames] = useState<string[] | null>(null)
   const [location, setLocation] = useState<GeoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<CheckinResult | null>(null)
@@ -187,7 +202,10 @@ function CheckinFlow() {
         new Set(courses.filter((c): c is Course => !!c?.require_face_recognition).map((c) => c.id)),
       )
       setSessions(visible)
-      setCheckedInSessionIds(new Set(history?.data.map((c) => c.session_id) ?? []))
+      // A "pending" check-in was sent back by staff and may be redone.
+      const past = history?.data ?? []
+      setCheckedInSessionIds(new Set(past.filter((c) => c.status !== 'pending').map((c) => c.session_id)))
+      setRecheckSessionIds(new Set(past.filter((c) => c.status === 'pending').map((c) => c.session_id)))
       setStep('select')
     } catch (err) {
       setError(extractErrorMessage(err))
@@ -210,10 +228,11 @@ function CheckinFlow() {
     }
     setFaceEnrollmentNeeded(false)
     setSelectedSession(session)
+    setChallenge(pickChallenge())
     setStep(user?.camera_consent ? 'camera' : 'camera-consent')
   }
 
-  async function submitCheckin(image: string | null, geo: GeoResult) {
+  async function submitCheckin(image: string | null, frames: string[] | null, geo: GeoResult) {
     if (!selectedSession) return
     setStep('submitting')
     setError(null)
@@ -238,6 +257,7 @@ function CheckinFlow() {
         location_accuracy_meters: geo.accuracy,
         device_fingerprint: identity.fingerprint,
         liveness_challenge_response: image,
+        ...(frames?.length ? { liveness_challenge_type: challenge, liveness_frames: frames } : {}),
         ...(proof ?? {}),
       })
       setResult(res.data)
@@ -248,13 +268,13 @@ function CheckinFlow() {
     }
   }
 
-  async function requestLocationAndSubmit(image: string | null) {
+  async function requestLocationAndSubmit(image: string | null, frames: string[] | null) {
     setStep('location')
     setError(null)
     try {
       const geo = await getCurrentPosition()
       setLocation(geo)
-      await submitCheckin(image, geo)
+      await submitCheckin(image, frames, geo)
     } catch (err) {
       if (err instanceof GeolocationError) {
         setError(err.message)
@@ -268,6 +288,7 @@ function CheckinFlow() {
   function reset() {
     setSelectedSession(null)
     setCapturedImage(null)
+    setCapturedFrames(null)
     setLocation(null)
     setResult(null)
     loadSessions()
@@ -355,6 +376,11 @@ function CheckinFlow() {
                         <CheckCircleIcon className="h-3.5 w-3.5" />
                         Already checked in
                       </span>
+                    ) : recheckSessionIds.has(session.id) ? (
+                      <span className="badge mt-2.5 bg-amber-50 normal-case text-amber-800">
+                        <RefreshIcon className="h-3.5 w-3.5" />
+                        Re-check requested{remaining && ` · ${remaining}`}
+                      </span>
                     ) : (
                       remaining && (
                         <span className="badge mt-2.5 bg-blue-50 normal-case text-blue-700">
@@ -417,12 +443,14 @@ function CheckinFlow() {
             </span>
           </p>
           <CameraCapture
-            onCapture={(image) => {
+            challenge={challenge}
+            onCapture={(image, frames) => {
               setCapturedImage(image)
+              setCapturedFrames(frames ?? null)
               if (!user?.geolocation_consent) {
                 setStep('location-consent')
               } else {
-                requestLocationAndSubmit(image)
+                requestLocationAndSubmit(image, frames ?? null)
               }
             }}
           />
@@ -448,7 +476,7 @@ function CheckinFlow() {
             try {
               await api.put('/users/me', { geolocation_consent: true })
               updateUser({ geolocation_consent: true })
-              await requestLocationAndSubmit(capturedImage)
+              await requestLocationAndSubmit(capturedImage, capturedFrames)
             } catch (err) {
               setError(extractErrorMessage(err))
             } finally {
@@ -470,7 +498,7 @@ function CheckinFlow() {
             <Alert type="error">{error}</Alert>
             <div className="grid grid-cols-2 gap-3">
               <button
-                onClick={() => requestLocationAndSubmit(capturedImage)}
+                onClick={() => requestLocationAndSubmit(capturedImage, capturedFrames)}
                 className="btn btn-primary"
               >
                 Try again
