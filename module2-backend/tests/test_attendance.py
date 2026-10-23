@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.database import utcnow
 from app.models import Course, Device, DeviceChallenge, Enrollment, Session, User
-from app.services.checkins import verify_and_consume_device_proof
+from app.services.checkins import decide_status, face_match_uncertain, verify_and_consume_device_proof
 
 
 IMAGE = "aGVsbG8="
@@ -366,3 +366,37 @@ def test_flagged_queue_appeal_review_and_visibility(client, db, make_user):
     assert review.json()["reviewed_by_id"] == instructor.id
     assert client.get(f"/api/v1/checkins/{checkin['id']}", headers=student_headers).status_code == 200
     assert len(client.get("/api/v1/checkins/my-checkins", headers=student_headers).json()) == 1
+
+
+def _face(score, passed=True, threshold=0.85):
+    return {"match_passed": passed, "match_score": score, "match_threshold": threshold}
+
+
+def _status(**overrides):
+    values = dict(risk_score=0.1, risk_threshold=0.5, distance=10.0, radius=100.0,
+                  liveness_required=False, liveness_passed=None, face_required=True,
+                  face_passed=True, device_required=False, device_verified=True)
+    values.update(overrides)
+    return decide_status(**values)
+
+
+def test_face_match_just_above_threshold_is_flagged_for_review():
+    # 0.856 is a measured different-person score that passed the 0.85 threshold.
+    assert face_match_uncertain(_face(0.856))
+    assert _status(face_uncertain=face_match_uncertain(_face(0.856))) == "flagged"
+
+
+def test_clear_face_match_is_still_approved():
+    assert not face_match_uncertain(_face(0.918))
+    assert _status(face_uncertain=face_match_uncertain(_face(0.918))) == "approved"
+
+
+def test_failed_face_match_is_rejected_not_flagged():
+    assert not face_match_uncertain(_face(0.77, passed=False))
+    assert _status(face_passed=False, face_uncertain=False) == "rejected"
+
+
+def test_review_band_follows_face_service_threshold():
+    assert face_match_uncertain(_face(0.93, threshold=0.90))
+    assert not face_match_uncertain(_face(0.93, threshold=0.85))
+    assert not face_match_uncertain(None)

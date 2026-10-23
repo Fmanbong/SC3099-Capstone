@@ -27,6 +27,17 @@ SIGNAL_WEIGHTS = {
     "geolocation": 0.15,
 }
 
+# A face match that passes by less than this margin over Module 3's threshold is
+# too close to call: different people have been measured just above it, so such
+# check-ins go to instructor review instead of being auto-approved.
+FACE_REVIEW_MARGIN = 0.05
+
+
+def face_match_uncertain(face_result: dict[str, Any] | None) -> bool:
+    if not face_result or not face_result["match_passed"]:
+        return False
+    return face_result["match_score"] < face_result["match_threshold"] + FACE_REVIEW_MARGIN
+
 
 def distance_meters(latitude: float, longitude: float, venue_latitude: float, venue_longitude: float) -> float:
     """Return great-circle distance using the haversine formula."""
@@ -79,6 +90,7 @@ def decide_status(
     device_required: bool,
     device_verified: bool,
     missing_required_evidence: bool = False,
+    face_uncertain: bool = False,
 ) -> str:
     if liveness_required and liveness_passed is False:
         return "rejected"
@@ -91,6 +103,8 @@ def decide_status(
     if distance is not None and radius is not None and distance > radius:
         return "flagged"
     if missing_required_evidence:
+        return "flagged"
+    if face_uncertain:
         return "flagged"
     if device_required and not device_verified:
         return "flagged"

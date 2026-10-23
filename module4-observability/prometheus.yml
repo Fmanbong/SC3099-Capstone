@@ -8,10 +8,8 @@ scrape_configs:
       - targets: ['backend:8000']
     metrics_path: '/metrics'
 
-  - job_name: 'saiv-face-recognition'
-    static_configs:
-      - targets: ['face-recognition:8001']
-    metrics_path: '/metrics'
+  # Module 3 (face-recognition) does not expose /metrics yet; add a job for
+  # face-recognition:8001 here once it does, or the target shows as "down".
 
   - job_name: 'prometheus'
     static_configs:

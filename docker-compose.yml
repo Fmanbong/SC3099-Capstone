@@ -55,11 +55,29 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:8501"]}
       FACE_SERVICE_URL: http://face-recognition:8001
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    # Same as the Dockerfile CMD, except that a missing SECRET_KEY falls back to a
+    # random per-start secret instead of refusing to boot. Set SECRET_KEY in the
+    # root .env (see .env.example) so logins survive backend restarts.
+    command:
+      - sh
+      - -c
+      - >-
+        export SECRET_KEY="$${SECRET_KEY:-$$(python -c 'import secrets; print(secrets.token_urlsafe(48))')}"
+        && alembic upgrade head
+        && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      face-recognition:
+        condition: service_started
     networks:
       - saiv-network
 
@@ -93,7 +111,8 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:8000
       NEXT_PUBLIC_FACE_SERVICE_URL: http://localhost:8001
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - saiv-network
 
@@ -108,9 +127,12 @@ services:
       DATABASE_URL: postgresql://saiv:saiv_password@postgres:5432/saiv
       BACKEND_URL: http://backend:8000
       PROMETHEUS_URL: http://prometheus:9090
+      GRAFANA_URL: http://localhost:3001
     depends_on:
-      - backend
-      - prometheus
+      backend:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
     networks:
       - saiv-network
 
@@ -119,7 +141,7 @@ services:
   # ==========================================================================
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.53.2
     container_name: saiv-prometheus
     ports:
       - "9090:9090"
@@ -133,7 +155,7 @@ services:
       - saiv-network
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.2.0
     container_name: saiv-grafana
     ports:
       - "3001:3000"
@@ -149,7 +171,7 @@ services:
       - saiv-network
 
   otel-collector:
-    image: otel/opentelemetry-collector:latest
+    image: otel/opentelemetry-collector:0.111.0
     container_name: saiv-otel-collector
     ports:
       - "4317:4317"   # gRPC

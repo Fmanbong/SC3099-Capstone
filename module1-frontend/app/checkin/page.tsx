@@ -24,7 +24,7 @@ import { api, extractErrorMessage } from '@/lib/api'
 import { getCurrentPosition, GeolocationError, type GeoResult } from '@/lib/geolocation'
 import { createDeviceProof, getDeviceIdentity } from '@/lib/device'
 import { displayText } from '@/lib/text'
-import type { CheckinHistoryItem, CheckinResult, Enrollment, Session } from '@/lib/types'
+import type { CheckinHistoryItem, CheckinResult, Course, Enrollment, Session } from '@/lib/types'
 
 type Step =
   | 'loading'
@@ -150,6 +150,7 @@ function CheckinFlow() {
   const [step, setStep] = useState<Step>('loading')
   const [sessions, setSessions] = useState<Session[]>([])
   const [checkedInSessionIds, setCheckedInSessionIds] = useState<Set<string>>(new Set())
+  const [faceRequiredCourseIds, setFaceRequiredCourseIds] = useState<Set<string>>(new Set())
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [location, setLocation] = useState<GeoResult | null>(null)
@@ -173,7 +174,19 @@ function CheckinFlow() {
         api.get<CheckinHistoryItem[]>('/checkins/my-checkins').catch(() => null),
       ])
       const courseIds = enrollments ? new Set(enrollments.data.map((e) => e.course_id)) : null
-      setSessions(courseIds ? active.data.filter((s) => courseIds.has(s.course_id)) : active.data)
+      const visible = courseIds ? active.data.filter((s) => courseIds.has(s.course_id)) : active.data
+      // A course can require face recognition for all of its sessions, which
+      // the session payload does not carry. A failed lookup falls back to the
+      // session's own flag; the backend still rejects unenrolled faces.
+      const courses = await Promise.all(
+        Array.from(new Set(visible.map((s) => s.course_id))).map((id) =>
+          api.get<Course>(`/courses/${id}`).then((r) => r.data).catch(() => null),
+        ),
+      )
+      setFaceRequiredCourseIds(
+        new Set(courses.filter((c): c is Course => !!c?.require_face_recognition).map((c) => c.id)),
+      )
+      setSessions(visible)
       setCheckedInSessionIds(new Set(history?.data.map((c) => c.session_id) ?? []))
       setStep('select')
     } catch (err) {
@@ -190,7 +203,8 @@ function CheckinFlow() {
 
   function selectSession(session: Session) {
     setError(null)
-    if (session.require_face_match && !user?.face_enrolled) {
+    const faceRequired = session.require_face_match || faceRequiredCourseIds.has(session.course_id)
+    if (faceRequired && !user?.face_enrolled) {
       setFaceEnrollmentNeeded(true)
       return
     }

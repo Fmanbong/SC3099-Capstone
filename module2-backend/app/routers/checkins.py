@@ -22,6 +22,7 @@ from app.services.audit import audit_event
 from app.services.checkins import (
     decide_status,
     distance_meters,
+    face_match_uncertain,
     factor,
     local_risk_score,
     verify_and_consume_device_proof,
@@ -252,6 +253,10 @@ def submit_checkin(
             factors.append(
                 factor("face_match_failed", 1 - face_result["match_score"], 0.25, "critical")
             )
+        elif face_match_uncertain(face_result):
+            factors.append(
+                factor("face_match_uncertain", 1 - face_result["match_score"], 0.25, "high")
+            )
 
     liveness_score = liveness_result["liveness_score"] if liveness_result else None
     face_score = face_result["match_score"] if face_result else None
@@ -303,6 +308,7 @@ def submit_checkin(
         device_required=bool(course.require_device_binding),
         device_verified=device_verified,
         missing_required_evidence=missing_required_evidence or bool(session.qr_code_secret and not qr_verified),
+        face_uncertain=face_match_uncertain(face_result),
     )
     template_hash = None
     if face_result:

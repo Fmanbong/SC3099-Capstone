@@ -43,6 +43,13 @@ export interface Session {
   require_face_match?: boolean
 }
 
+export interface Course {
+  id: string
+  code: string
+  name: string
+  require_face_recognition?: boolean
+}
+
 export interface RiskFactor {
   type: string
   weight?: number
