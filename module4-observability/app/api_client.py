@@ -283,6 +283,10 @@ class APIClient:
     def review_checkin(self, checkin_id, status, review_notes):
         return self.post(f"/api/v1/checkins/{checkin_id}/review", {"status": status, "review_notes": review_notes})
 
+    def reverify_checkin(self, checkin_id, review_notes):
+        # sends the check-in back as pending so the student redoes it live
+        return self.post(f"/api/v1/checkins/{checkin_id}/reverify", {"review_notes": review_notes})
+
     def get_overview_stats(self, course_id=None, days=7):
         params = {"days": days}
         if  course_id is not None:

@@ -368,6 +368,54 @@ def test_flagged_queue_appeal_review_and_visibility(client, db, make_user):
     assert len(client.get("/api/v1/checkins/my-checkins", headers=student_headers).json()) == 1
 
 
+def test_reverification_lets_student_redo_flagged_checkin_once(client, db, make_user):
+    student, student_headers = make_user(camera_consent=True, geolocation_consent=True)
+    instructor, instructor_headers = make_user(role="instructor")
+    _, session = attendance_setup(db, student, instructor)
+    session.require_liveness_check = False
+    db.commit()
+    body = {"session_id": session.id, "latitude": 1.3483, "longitude": 103.6831,
+            "device_fingerprint": f"device-{uuid.uuid4().hex}"}
+    first = client.post("/api/v1/checkins/", headers=student_headers, json=body).json()
+    assert first["status"] == "flagged"  # unsigned device on a device-bound course
+
+    # Students cannot send their own check-in back, and a normal resubmission is refused.
+    assert client.post(f"/api/v1/checkins/{first['id']}/reverify", headers=student_headers,
+                       json={"review_notes": "x"}).status_code == 403
+    assert client.post("/api/v1/checkins/", headers=student_headers, json=body).status_code == 400
+
+    sent_back = client.post(f"/api/v1/checkins/{first['id']}/reverify", headers=instructor_headers,
+                            json={"review_notes": "Face match uncertain, please redo."})
+    assert sent_back.status_code == 200
+    assert sent_back.json()["status"] == "pending"
+
+    redo = client.post("/api/v1/checkins/", headers=student_headers, json=body)
+    assert redo.status_code == 201
+    assert redo.json()["id"] == first["id"]  # same record, fresh evidence
+    assert redo.json()["status"] == "flagged"
+    assert redo.json()["reviewed_by_id"] is None
+    # Exactly one redo: the check-in is no longer pending.
+    assert client.post("/api/v1/checkins/", headers=student_headers, json=body).status_code == 400
+    assert len(client.get("/api/v1/checkins/my-checkins", headers=student_headers).json()) == 1
+
+
+def test_reverification_only_applies_to_checkins_awaiting_review(client, db, make_user):
+    student, student_headers = make_user(camera_consent=True, geolocation_consent=True)
+    instructor, instructor_headers = make_user(role="instructor")
+    _, session = attendance_setup(db, student, instructor)
+    session.require_liveness_check = False
+    db.commit()
+    checkin = client.post("/api/v1/checkins/", headers=student_headers, json={
+        "session_id": session.id, "latitude": 1.3483, "longitude": 103.6831,
+        "device_fingerprint": f"device-{uuid.uuid4().hex}"}).json()
+    client.post(f"/api/v1/checkins/{checkin['id']}/review", headers=instructor_headers,
+                json={"status": "approved", "review_notes": "Confirmed in class."})
+    again = client.post(f"/api/v1/checkins/{checkin['id']}/reverify", headers=instructor_headers,
+                        json={"review_notes": "Second thoughts."})
+    assert again.status_code == 400
+    assert again.json()["code"] == "REVERIFY_NOT_ALLOWED"
+
+
 def _face(score, passed=True, threshold=0.85):
     return {"match_passed": passed, "match_score": score, "match_threshold": threshold}
 

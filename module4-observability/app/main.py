@@ -25,6 +25,7 @@ LOCAL_TZ = ZoneInfo("Asia/Singapore")  # TODO - does this need to be case sensit
 TRANSITIONS     = {"scheduled": ["active", "cancelled"], "active": ["closed", "cancelled"],
                    "closed": ["cancelled"], "cancelled": []}
 CHECKIN_COLUMNS = ["id", "student_name", "student_email", "course_code", "session_name", "status", "checked_in_at", "risk_score"]
+RECHECK         = "request re-check"
 
 def local_datetime(day, clock):
     return datetime.combine(day, clock, tzinfo=LOCAL_TZ)
@@ -436,17 +437,24 @@ def checkin_details(checkin_id):
     if  detail.get("review_notes"):
         st.write("**REVIEW NOTES:**", detail["review_notes"])
     if  detail["status"] in {"flagged", "appealed"}:
+        # face photos are never stored, so a doubtful match is settled by fresh live evidence
         with st.form(f"review_form_{checkin_id}"):
-            decision = st.selectbox("REVIEW DECISION", ["approved", "rejected"], key=f"decision_{checkin_id}")
+            decision = st.selectbox("REVIEW DECISION", ["approved", "rejected", RECHECK], key=f"decision_{checkin_id}",
+                                    help="request re-check sends it back for the student to redo live while the check-in window is open")
             notes = st.text_area("REVIEW NOTES", max_chars=2000, key=f"notes_{checkin_id}")
             confirm = st.checkbox("I confirm this review decision", key=f"review_confirm_{checkin_id}")
             submitted = submit_button("SUBMIT REVIEW")
         if  submitted:
             if  not confirm or not notes.strip():
                 st.error("enter review notes and confirm the decision before submitting")
+            elif decision == RECHECK:
+                st.session_state.api.reverify_checkin(checkin_id, notes.strip())
+                changed("re-check requested. the student can redo the check-in while the session's window is open.")
             else:
                 st.session_state.api.review_checkin(checkin_id, decision, notes.strip())
                 changed(f"check-in reviewed as {decision}.")
+    elif detail["status"] == "pending":
+        st.info("waiting for the student to redo this check-in (re-check requested)")
     else:
         st.info("only flagged or appealed check-ins can be reviewed")
 

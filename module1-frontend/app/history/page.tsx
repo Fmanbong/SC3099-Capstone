@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Alert from '@/components/Alert'
 import Spinner, { LoadingState } from '@/components/Spinner'
@@ -16,6 +17,9 @@ const statusColor: Record<string, string> = {
   rejected: 'bg-red-50 text-red-700 ring-red-600/20',
   appealed: 'bg-blue-50 text-blue-700 ring-blue-600/20',
 }
+
+// "pending" is only ever set by staff asking the student to redo the check-in.
+const statusLabel: Record<string, string> = { pending: 're-check requested' }
 
 function AppealForm({ checkinId, onDone }: { checkinId: string; onDone: () => void }) {
   const [reason, setReason] = useState('')
@@ -86,9 +90,18 @@ function CheckinRow({ item, onAppealed }: { item: CheckinHistoryItem; onAppealed
             statusColor[item.status] ?? 'bg-slate-100 text-slate-700 ring-slate-500/20'
           }`}
         >
-          {item.status}
+          {statusLabel[item.status] ?? item.status}
         </span>
       </div>
+      {item.status === 'pending' && (
+        <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-600">
+          Your instructor asked you to redo this check-in.{' '}
+          <Link href="/checkin" className="font-medium text-blue-700 underline">
+            Check in again
+          </Link>{' '}
+          while the session is still open.
+        </p>
+      )}
       {canAppeal && !appealing && (
         <button
           onClick={() => setAppealing(true)}
