@@ -92,7 +92,10 @@ def decide_status(
     device_verified: bool,
     missing_required_evidence: bool = False,
     face_uncertain: bool = False,
+    replay_detected: bool = False,
 ) -> str:
+    if replay_detected:
+        return "rejected"
     if liveness_required and liveness_passed is False:
         return "rejected"
     if face_required and face_passed is False:

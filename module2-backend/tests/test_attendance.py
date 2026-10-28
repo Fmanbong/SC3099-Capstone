@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import uuid
 from datetime import datetime, timedelta
 
@@ -414,6 +415,60 @@ def test_reverification_only_applies_to_checkins_awaiting_review(client, db, mak
                         json={"review_notes": "Second thoughts."})
     assert again.status_code == 400
     assert again.json()["code"] == "REVERIFY_NOT_ALLOWED"
+
+
+class HashingFaceService:
+    """Liveness always passes; the face hash is derived from the image bytes, like a real template."""
+
+    def liveness(self, image, challenge_type="passive", *, frames=None):
+        return {"liveness_passed": True, "liveness_score": 0.95, "liveness_threshold": 0.6,
+                "face_embedding_hash": hashlib.sha256(image.encode()).hexdigest(), "details": {}}
+
+    def assess(self, signals):
+        return {"risk_score": 0.1, "risk_level": "LOW", "pass_threshold": True, "risk_threshold": 0.5,
+                "signal_breakdown": {}, "recommendations": []}
+
+
+def _image_checkin(client, headers, session, image):
+    return client.post("/api/v1/checkins/", headers=headers, json={
+        "session_id": session.id, "latitude": 1.3483, "longitude": 103.6831,
+        "location_accuracy_meters": 15, "device_fingerprint": f"device-{uuid.uuid4().hex}",
+        "liveness_challenge_response": image}).json()
+
+
+def test_resubmitting_the_same_photo_is_rejected_as_replay(client, db, make_user):
+    client.app.state.face_client = HashingFaceService()
+    student, headers = make_user(camera_consent=True, geolocation_consent=True)
+    admin, admin_headers = make_user(role="admin")
+    _, first_session = attendance_setup(db, student, require_device_binding=False)
+    _, second_session = attendance_setup(db, student, require_device_binding=False)
+    photo = base64.b64encode(b"one stored photo").decode()
+
+    first = _image_checkin(client, headers, first_session, photo)
+    replay = _image_checkin(client, headers, second_session, photo)
+    assert first["status"] == "approved"
+    assert replay["status"] == "rejected"
+    assert "image_replay" in [item["type"] for item in replay["risk_factors"]]
+    logs = client.get("/api/v1/audit/", headers=admin_headers, params={"action": "security_violation"}).json()
+    assert logs["total"] == 1
+    assert logs["items"][0]["details"]["violation_type"] == "image_replay"
+
+
+def test_replay_check_is_per_student_and_per_photo(client, db, make_user):
+    client.app.state.face_client = HashingFaceService()
+    alice, alice_headers = make_user(camera_consent=True, geolocation_consent=True)
+    bob, bob_headers = make_user(camera_consent=True, geolocation_consent=True)
+    _, alice_one = attendance_setup(db, alice, require_device_binding=False)
+    _, alice_two = attendance_setup(db, alice, require_device_binding=False)
+    _, bob_one = attendance_setup(db, bob, require_device_binding=False)
+    shared = base64.b64encode(b"stock sample photo").decode()
+
+    assert _image_checkin(client, alice_headers, alice_one, shared)["status"] == "approved"
+    # Another student using the same sample photo is not a replay of Alice's check-in.
+    assert _image_checkin(client, bob_headers, bob_one, shared)["status"] == "approved"
+    # A new capture from the same student is not a replay either.
+    fresh = base64.b64encode(b"a new live capture").decode()
+    assert _image_checkin(client, alice_headers, alice_two, fresh)["status"] == "approved"
 
 
 def _face(score, passed=True, threshold=0.85):

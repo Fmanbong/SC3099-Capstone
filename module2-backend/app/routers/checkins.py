@@ -324,7 +324,25 @@ def submit_checkin(
         if not qr_verified:
             factors.append(factor("qr_code_unverified", 0.7, 0.10, "high"))
 
+    template_hash = None
+    if face_result:
+        template_hash = face_result.get("current_template_hash") or None
+    elif liveness_result:
+        template_hash = liveness_result.get("face_embedding_hash") or None
+    # Two live captures never yield the same 256-bit face hash (frames seconds
+    # apart still differ in several bits), so an identical hash on one of this
+    # student's earlier check-ins means a stored photo was resubmitted. Scoped
+    # to the student: different students may share a stock photo legitimately.
+    replay_detected = bool(template_hash) and db.scalar(
+        select(CheckIn.id)
+        .where(CheckIn.student_id == user.id, CheckIn.face_embedding_hash == template_hash)
+        .limit(1)
+    ) is not None
+    if replay_detected:
+        factors.append(factor("image_replay", 1.0, 0.25, "critical"))
+
     checkin_status = decide_status(
+        replay_detected=replay_detected,
         risk_score=risk_score,
         risk_threshold=threshold,
         distance=distance,
@@ -338,11 +356,6 @@ def submit_checkin(
         missing_required_evidence=missing_required_evidence or bool(session.qr_code_secret and not qr_verified),
         face_uncertain=face_match_uncertain(face_result),
     )
-    template_hash = None
-    if face_result:
-        template_hash = face_result.get("current_template_hash") or None
-    elif liveness_result:
-        template_hash = liveness_result.get("face_embedding_hash") or None
     evidence = dict(
         device_id=device.id if device else None,
         status=checkin_status,
@@ -410,6 +423,17 @@ def submit_checkin(
         request=request,
         severity="warning" if checkin_status in {"flagged", "rejected"} else "info",
     )
+    if replay_detected:
+        audit_event(
+            db,
+            "security_violation",
+            user_id=user.id,
+            resource_type="checkin",
+            resource_id=checkin.id,
+            details={"violation_type": "image_replay", "session_id": session.id},
+            request=request,
+            severity="critical",
+        )
     db.commit()
     return checkin_data(checkin, db)
 
