@@ -40,6 +40,12 @@ def current_user(request: Request, credentials: HTTPAuthorizationCredentials = D
     request.state.user_id = user.id
     if not settings.public_test_mode:
         request.app.state.limiter.check(f'api:{user.id}', 1000, 3600)
+    # FastAPI runs each sync dependency and the endpoint as separate threadpool
+    # jobs. Holding this read transaction's pooled connection across that hop
+    # deadlocks under bursts (every worker thread waits for a connection while
+    # every connection waits for a thread), so release it here; the endpoint
+    # checks out a connection again when it next queries.
+    db.commit()
     return user
 
 
