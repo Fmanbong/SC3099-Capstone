@@ -1,12 +1,11 @@
 
-""" COMMENTARY
-- SAIV mod 4 instructor dashboard with the mod 2 APIs
-"""
+"""Streamlit interface for attendance, sessions and monitoring."""
 import csv , io , json , math , os
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 from api_client import APIClient, APIError, PrometheusClient, QUERIES
+from ui import apply_theme, brand, profile, detail_header, metadata, empty_state, service_states, panel
 from datetime   import datetime, time, timedelta, timezone
 from uuid       import UUID
 from zoneinfo   import ZoneInfo
@@ -17,15 +16,41 @@ try:
 except ImportError:
     st_autorefresh = None
 
-st.set_page_config(page_title="SAIV INSTRUCTOR DASHBOARD", layout="wide")
+st.set_page_config(page_title="SAIV instructor dashboard", layout="wide")
 BACKEND_URL    = os.getenv("BACKEND_URL",    "http://localhost:8000")
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
 
-LOCAL_TZ = ZoneInfo("Asia/Singapore")  # TODO - does this need to be case sensitive
+LOCAL_TZ = ZoneInfo("Asia/Singapore")  # Interpret form inputs and display timestamps in Singapore time.
 TRANSITIONS     = {"scheduled": ["active", "cancelled"], "active": ["closed", "cancelled"],
                    "closed": ["cancelled"], "cancelled": []}
 CHECKIN_COLUMNS = ["id", "student_name", "student_email", "course_code", "session_name", "status", "checked_in_at", "risk_score"]
 RECHECK         = "request re-check"
+ACCENT          = "#b9acfa"
+STATUS_LABELS   = {"approved": "Approved", "rejected": "Rejected", "flagged": "Flagged",
+                   "appealed": "Appealed", "pending": "Re-check requested"}
+STATUS_COLOURS  = {"approved": "#9acbb7", "flagged": "#d4bb8a", "rejected": "#d89aa6",
+                   "pending": ACCENT, "appealed": "#9daed2"}
+
+def dashboard_style():
+    apply_theme()
+
+def chart(figure, *, height=300):
+    figure.update_layout(
+        template="plotly_dark", height=height, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font={"family": "JetBrains Mono, sans-serif", "color": "#9a9fad", "size": 11},
+        margin={"l": 8, "r": 12, "t": 20, "b": 16},
+        colorway=[ACCENT, "#9acbb7", "#9daed2", "#d4bb8a", "#d89aa6"],
+        legend={"title_text": "", "orientation": "h", "y": -0.22},
+        hoverlabel={"bgcolor": "#292b35", "font_family": "JetBrains Mono, sans-serif", "font_size": 12},
+    )
+    figure.update_traces(marker_line_width=0)
+    figure.update_xaxes(showgrid=False, title_text="", tickfont_size=10)
+    figure.update_yaxes(gridcolor="#2a2d36", zeroline=False, title_text="", tickfont_size=10, automargin=True)
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+
+def page_intro(title, description):
+    st.header(title)
+    st.caption(description)
 
 def local_datetime(day, clock):
     return datetime.combine(day, clock, tzinfo=LOCAL_TZ)
@@ -41,6 +66,33 @@ def parse_datetime(value):
 def display_time(value):
     result = parse_datetime(value)
     return result.strftime("%d %b %Y %H:%M SGT") if result else "not recorded"
+
+def recheck_window(session, now=None):
+    """Check whether the session is active and its check-in window is open."""
+    if  session.get("status") != "active":
+        return False, "Re-check is available only for an active session. You can still approve or reject this record."
+    try:
+        opens  = parse_datetime(session.get("checkin_opens_at"))
+        closes = parse_datetime(session.get("checkin_closes_at"))
+    except (ValueError, TypeError, AttributeError):
+        return False, "The check-in window could not be verified. Refresh the record before requesting a re-check."
+    if  opens is None or closes is None or closes <= opens:
+        return False, "The check-in window could not be verified. Refresh the record before requesting a re-check."
+    now = now or datetime.now(LOCAL_TZ)
+    if  now < opens:
+        return False, f"Re-check becomes available when check-in opens at {display_time(session['checkin_opens_at'])}."
+    if  now > closes:
+        return False, "The check-in window has closed. You can still approve or reject this record."
+    return True, "The student can submit a fresh check-in while this window remains open."
+
+def recheck_availability(session_id):
+    session = st.session_state.api.get_session(session_id)
+    allowed, message = recheck_window(session)
+    if  allowed:
+        course = st.session_state.api.get_course(session["course_id"])
+        if  not course.get("is_active"):
+            return False, "This course is inactive. You can still approve or reject this record."
+    return allowed, message
 
 def score_text(value):
     if  value is None:
@@ -75,7 +127,7 @@ def validate_window(start, end, opens=None, closes=None, *, require_future=False
 def date_filters(start, end):
     if  end < start:
         raise ValueError("the end date must not precede the start date.")
-    # sending UTC offsets and the backend does not has to guess a timezone
+    # Send explicit timezone offsets with date filters.
     return {"start_date": local_datetime(start, time.min).isoformat(),
             "end_date":   local_datetime(end,   time.max).isoformat()}
 
@@ -91,7 +143,7 @@ def safe_csv(rows, columns):
                  value = ""
             elif isinstance(value, (dict, list)):
                  value = json.dumps(value, ensure_ascii=False)
-            # this is so the text from the users will not become a spreadsheet formula on opening
+            # Prevent user text from being evaluated as a spreadsheet formula.
             if  isinstance(value, str) and (value.startswith(("\t", "\r", "\n")) or value.lstrip().startswith(("=", "+", "-", "@"))):
                 value = "'" + value
             values.append(value)
@@ -100,7 +152,7 @@ def safe_csv(rows, columns):
 
 def reset_login(message=None):
     st.session_state.api.clear_auth()
-    # this removes all the user data and prepared downloads and widgets before another login
+    # Clear user data, downloads and widgets before the next login.
     st.session_state.clear()
     if  message:
         st.session_state.auth_message = message
@@ -113,11 +165,10 @@ def show_error(exc):
     if  exc.retry_after:
         st.caption(f"retry after {exc.retry_after} seconds.")
     if  exc.request_id:
-        st.caption(f"backend request id: {exc.request_id}")
+        st.caption(f"Request ID: {exc.request_id}")
 
 def changed(message):
-    """ apply page resets at the start of the next run before widgets are created
-    """
+    """Reset pagination and confirmations before the next widget render."""
     st.session_state.pop("prepared_export", None)
     st.session_state.reset_pages = True
     st.session_state.notice = message
@@ -125,14 +176,14 @@ def changed(message):
     st.rerun()
 
 def submit_button(label):
-    clicked = st.form_submit_button(label)
+    primary = label in {"Create session", "Save session changes", "Submit review"}
+    clicked = st.form_submit_button(label, type="primary" if primary else "secondary")
     return clicked and not skip_submissions
 
 def select_record(label, options, key):
     current = st.session_state.get(key)
     st.session_state[key] = current if current in options else next(iter(options))
-    # the labels can change after editing
-    # preserve the authorised ID across reruns
+    # Preserve the selected ID when a record label changes.
     return st.selectbox(label, list(options), index=None, format_func=options.get, key=key)
 
 def dataframe(rows, columns=None):
@@ -140,7 +191,22 @@ def dataframe(rows, columns=None):
         frame = pd.DataFrame(rows)
         if  columns:
             frame = frame.reindex(columns=columns)
-        st.dataframe(frame, use_container_width=True, hide_index=True)
+        # Format a copy so API rows and CSV exports remain unchanged.
+        time_columns = {"checked_in_at", "scheduled_start", "scheduled_end", "timestamp", "created_at", "reviewed_at"}
+        for column in time_columns.intersection(frame.columns):
+            frame[column] = frame[column].map(lambda value: display_time(value) if pd.notna(value) else "—")
+        if  "status" in frame:
+            frame["status"] = frame["status"].map(lambda value: STATUS_LABELS.get(value, str(value).capitalize()))
+        labels = {"id": "Record ID", "student_name": "Student", "student_email": "Email",
+                  "course_code": "Course", "session_name": "Session", "scheduled_start": "Starts (SGT)",
+                  "scheduled_end": "Ends (SGT)", "checked_in_at": "Checked in (SGT)", "risk_score": "Risk score"}
+        frame = frame.rename(columns={column: labels.get(column, column.replace("_", " ").capitalize()) for column in frame.columns})
+        config = {column: st.column_config.NumberColumn(column, format="%.2f")
+                  for column in ["Risk score", "Score", "Weight", "Average risk score"] if column in frame}
+        if  "Record ID" in frame:
+            config["Record ID"] = None  # Full IDs remain available in selectors, details and exports.
+        st.dataframe(frame, column_config=config, use_container_width=True, hide_index=True,
+                     height=min(390, 38 * (len(frame) + 1) + 4))
 
 def page_number(key, context):
     context_key = f"{key}_context"
@@ -149,21 +215,20 @@ def page_number(key, context):
         st.session_state[context_key] = context
     if  key not in st.session_state:
         st.session_state[key] = 1
-    return int(st.number_input("PAGE", min_value=1, max_value=20001, step=1, key=key))  # no have value=1 .. that gives a warning on the website
+    return int(st.number_input("Page", min_value=1, max_value=20001, step=1, key=key))  # Session State supplies the initial widget value.
 
 def show_page(response, number, noun):
     start = (number - 1) * response["limit"]
     count, total = len(response["items"]), response["total"]
-    st.caption(f"showing {count} of {total} authorized {noun}. page {number}")
+    st.caption(f"{count} of {total} {noun} · Page {number}")
     if   total and start >= total:
          st.info("this page has no records. choose an earlier page")
     elif not count:
-         st.info(f"no {noun} match the current filters")
+         empty_state(f"No matching {noun}", "Try another filter or check back after new records are added.")
 
 def staff_courses(*, active_only=False):
     user = st.session_state.user
-    # the course listing itself is not scoped
-    # the instructors must request their assignments
+    # Explicitly filter the course listing to instructor assignments.
     courses = st.session_state.api.get_all_courses(
         instructor_id=user["id"] if user["role"] == "instructor" else None
     )
@@ -174,7 +239,7 @@ def prepared_download(label, scope, fetch, filename):
     prepared = st.session_state.get("prepared_export")
     if  prepared and prepared["key"] != key:
         st.session_state.pop("prepared_export", None)
-    if  st.button(f"PREPARE {label}", key=f"prepare_{scope[0]}"):
+    if  st.button(f"Prepare {label}", key=f"prepare_{scope[0]}"):
         st.session_state.pop("prepared_export", None)
         try:
             st.session_state.prepared_export = {"key": key, "data": fetch()}
@@ -182,78 +247,100 @@ def prepared_download(label, scope, fetch, filename):
             show_error(exc)
     prepared = st.session_state.get("prepared_export")
     if  prepared and prepared["key"] == key:
-        st.download_button(f"DOWNLOAD {label}", data=prepared["data"],
+        st.download_button(f"Download {label}", data=prepared["data"],
                            file_name=filename, mime="text/csv", key=f"download_{scope[0]}")
-        st.caption("this is a prepared snapshot. prepare it again to include later changes.")
+        st.caption("Snapshot ready · Prepare again after making changes.")
+
+def open_review_queue():
+    st.session_state.navigation = "Check-ins"
+    st.session_state.checkins_review_only = True
 
 def overview_page():
-    st.header("OVERVIEW")
+    page_intro("Overview", "Attendance across your assigned courses.")
     api = st.session_state.api
     overview = api.get_overview_stats()
-    for col, label, value in zip(st.columns(4),
-            ["TOTAL SESSIONS", "ACTIVE SESSIONS", "CHECK-INS TODAY (UTC)", "APPROVAL RATE"],
-            [overview["total_sessions"], overview["active_sessions"], overview["total_checkins_today"], f"{overview['approval_rate']:.1%}"]):
-        col.metric(label, value)
-    st.caption("approval rate uses all retained check ins. an active status does not on its own open a check in window")
-    st.metric("AWAITING REVIEW", overview["flagged_pending_review"])
+    values = [overview["total_sessions"], overview["active_sessions"], overview["total_checkins_today"], f"{overview['approval_rate']:.1%}"]
+    helps = ["All authorized sessions.", "Active status; the check-in window must also be open.",
+             "Check-ins grouped by UTC date.", "Approved check-ins as a share of retained check-ins."]
+    for col, label, value, hint in zip(st.columns(4),
+            ["Total sessions", "Active sessions", "Check-ins today", "Approval rate"], values, helps):
+        col.metric(label, value, help=hint)
     recent = api.get_checkins(limit=10)["items"]
-    left, right = st.columns(2)
+    left, right = st.columns([2.1, 1])
     with left:
-        st.subheader("RECENT VERIFICATION STATUS")
-        if  recent:
-            counts = pd.DataFrame(recent)["status"].value_counts().rename_axis("status").reset_index(name="count")
-            st.plotly_chart(px.pie(counts, names="status", values="count"), use_container_width=True)
-            st.caption("latest 10 authorized check ins. this is a sample not an all-time breakdown")
-        else:
-            st.info("no check ins are recorded for your courses yet")
+        with panel():
+            st.subheader("Check-in activity")
+            trend = overview.get("trends", {}).get("checkins_by_day", [])
+            if trend:
+                figure = px.line(pd.DataFrame(trend), x="date", y="count", markers=True,
+                                 color_discrete_sequence=[ACCENT])
+                figure.update_traces(fill="tozeroy", fillcolor="rgba(185,172,250,0.07)", line_width=2)
+                figure.update_yaxes(rangemode="tozero", dtick=max(1, math.ceil(max(point["count"] for point in trend) / 4)))
+                chart(figure, height=325)
+                st.caption("Daily totals · UTC")
+            else:
+                empty_state("No activity yet", "Daily check-ins will appear here.")
     with right:
-        st.subheader("DAILY CHECK-INS")
-        trend = overview.get("trends", {}).get("checkins_by_day", [])
-        if  trend:
-            st.plotly_chart(px.line(pd.DataFrame(trend), x="date", y="count", markers=True), use_container_width=True)
-            st.caption("daily totals are grouped by utc dates by module 2")
-    st.subheader("RECENT CHECK-INS")
-    dataframe(recent, CHECKIN_COLUMNS)
-    if  st.checkbox("SHOW COURSE ATTENDANCE AND GRADEBOOK EXPORT", key="show_course_stats"):
-        courses = staff_courses()
-        if  not courses:
-            st.info("no courses are assigned to your account")
-            return
-        options = {course["id"]: f"{course['code']} — {course['name']}" for course in courses}
-        course_id = select_record("COURSE", options, "overview_course")
-        # check again the course access before showing any prepared download
-        api.get_course(course_id)
-        stats = api.get_course_stats(course_id)
-        cols  = st.columns(3)
-        cols[0].metric("ENROLLED STUDENTS",  stats["total_enrolled"])
-        cols[1].metric("SESSIONS TO DATE",   stats["total_sessions"])
-        cols[2].metric("ATTENDANCE RATE", f"{stats['overall_attendance_rate']:.1%}")
-        dataframe(stats.get("student_attendance", []))
-        if  stats.get("low_attendance_alerts"):
-            st.warning("students below 75% attendance for eligible sessions:")
-            dataframe(stats["low_attendance_alerts"])
-        prepared_download("COURSE CSV", ("course", course_id),
-                           lambda: api.export_attendance(course_id), f"course_{course_id}_attendance.csv")
-        st.caption("course statistics and export include non-cancelled sessions through the backend's current utc day")
+        with panel():
+            st.subheader("Needs attention")
+            st.metric("Awaiting review", overview["flagged_pending_review"], help="Flagged and appealed records awaiting a decision.")
+            st.button("Open review queue", key="overview_review_queue", on_click=open_review_queue, use_container_width=True)
+            if recent:
+                counts = pd.DataFrame(recent)["status"].value_counts().rename_axis("status").reset_index(name="count")
+                counts["label"] = counts["status"].map(STATUS_LABELS)
+                figure = px.bar(counts, x="count", y="label", orientation="h", color="status",
+                                color_discrete_map=STATUS_COLOURS, text_auto=True)
+                figure.update_layout(showlegend=False, bargap=.55)
+                figure.update_xaxes(dtick=max(1, math.ceil(int(counts["count"].max()) / 3)))
+                chart(figure, height=170)
+                st.caption("Status mix · Latest 10 check-ins")
+    with panel():
+        st.subheader("Recent check-ins")
+        if recent:
+            dataframe(recent, CHECKIN_COLUMNS)
+        else:
+            empty_state("No check-ins yet", "Attendance records will appear after students check in.")
+    with st.expander("Course attendance & gradebook"):
+        show_course = st.checkbox("Show course attendance and gradebook export", key="show_course_stats")
+        if show_course:
+            courses = staff_courses()
+            if not courses:
+                st.info("No courses are assigned to this account.")
+                return
+            options = {course["id"]: f"{course['code']} — {course['name']}" for course in courses}
+            course_id = select_record("Course", options, "overview_course")
+            api.get_course(course_id)
+            stats = api.get_course_stats(course_id)
+            cols = st.columns(3)
+            cols[0].metric("Enrolled students", stats["total_enrolled"])
+            cols[1].metric("Sessions to date", stats["total_sessions"])
+            cols[2].metric("Attendance rate", f"{stats['overall_attendance_rate']:.1%}")
+            dataframe(stats.get("student_attendance", []))
+            if stats.get("low_attendance_alerts"):
+                st.warning("Attendance below 75% for eligible sessions.")
+                dataframe(stats["low_attendance_alerts"])
+            prepared_download("Course CSV", ("course", course_id), lambda: api.export_attendance(course_id),
+                              f"course_{course_id}_attendance.csv")
+            st.caption("Non-cancelled sessions through today (UTC).")
 
-def time_inputs(prefix, start, end, labels=("START", "END")):
-    st.caption("dates and times use asia/singapore (utc+08:00)")
+def time_inputs(prefix, start, end, labels=("Start", "End")):
+    st.caption("Singapore time · UTC+08:00")
     cols = st.columns(2)
     with cols[0]:
-         start_day   = st.date_input(f"{labels[0]} DATE", value=start.date(), key=f"{prefix}_start_day")
-         start_clock = st.time_input(f"{labels[0]} TIME", value=start.time().replace(tzinfo=None), key=f"{prefix}_start_clock")
+         start_day   = st.date_input(f"{labels[0]} date", value=start.date(), key=f"{prefix}_start_day")
+         start_clock = st.time_input(f"{labels[0]} time", value=start.time().replace(tzinfo=None), key=f"{prefix}_start_clock")
     with cols[1]:
-         end_day     = st.date_input(f"{labels[1]} DATE", value=end.date(), key=f"{prefix}_end_day")
-         end_clock   = st.time_input(f"{labels[1]} TIME", value=end.time().replace(tzinfo=None), key=f"{prefix}_end_clock")
+         end_day     = st.date_input(f"{labels[1]} date", value=end.date(), key=f"{prefix}_end_day")
+         end_clock   = st.time_input(f"{labels[1]} time", value=end.time().replace(tzinfo=None), key=f"{prefix}_end_clock")
     return local_datetime(start_day, start_clock), local_datetime(end_day, end_clock)
 
 def venue_inputs(prefix, existing=None):
     existing = existing or {}
-    name = st.text_input("VENUE NAME", value=existing.get("venue_name") or "", max_chars=255, key=f"{prefix}_venue")
+    name = st.text_input("Venue name", value=existing.get("venue_name") or "", max_chars=255, key=f"{prefix}_venue")
     cols = st.columns(3)
-    latitude  = cols[0].number_input("LATITUDE",        min_value=-90.0,  max_value=90.0,    value=existing.get("venue_latitude"),  format="%.6f",       key=f"{prefix}_latitude")
-    longitude = cols[1].number_input("LONGITUDE",       min_value=-180.0, max_value=180.0,   value=existing.get("venue_longitude"), format="%.6f",       key=f"{prefix}_longitude")
-    radius    = cols[2].number_input("RADIUS (METRES)", min_value=1.0,    max_value=10000.0, value=float(existing.get("geofence_radius_meters") or 100), key=f"{prefix}_radius")
+    latitude  = cols[0].number_input("Latitude",        min_value=-90.0,  max_value=90.0,    value=existing.get("venue_latitude"),  format="%.6f",       key=f"{prefix}_latitude")
+    longitude = cols[1].number_input("Longitude",       min_value=-180.0, max_value=180.0,   value=existing.get("venue_longitude"), format="%.6f",       key=f"{prefix}_longitude")
+    radius    = cols[2].number_input("Radius (metres)", min_value=1.0,    max_value=10000.0, value=float(existing.get("geofence_radius_meters") or 100), key=f"{prefix}_radius")
     return {"venue_name": name.strip() or None, "venue_latitude": latitude, "venue_longitude": longitude, "geofence_radius_meters": radius}
 
 def validate_venue(venue):
@@ -261,23 +348,23 @@ def validate_venue(venue):
         raise ValueError("enter both venue coordinates when overriding the course venue")
 
 def create_session_form():
-    st.subheader("CREATE NEW SESSION")
+    st.subheader("Create new session")
     courses = staff_courses(active_only=True)
     if  not courses:
         st.info("you need an active course assignment before you can create a session.")
         return
     options  = {course["id"]: f"{course['code']} — {course['name']}" for course in courses}
     tomorrow = datetime.combine(datetime.now(LOCAL_TZ).date() + timedelta(days=1), time(9), LOCAL_TZ)
-    override_venue = st.checkbox("SET A SESSION VENUE INSTEAD OF THE COURSE DEFAULT", key="create_override_venue")
+    override_venue = st.checkbox("Set a session venue instead of the course default", key="create_override_venue")
     with st.form("create_session_form", clear_on_submit=False):
-        name = st.text_input("SESSION NAME", max_chars=255, key="create_name")
-        course_id = select_record("COURSE", options, "create_course")
-        session_type = st.selectbox("SESSION TYPE", ["lecture", "tutorial", "lab", "exam"], key="create_type")
-        description = st.text_area("DESCRIPTION (OPTIONAL)", max_chars=5000, key="create_description")
+        name = st.text_input("Session name", max_chars=255, key="create_name")
+        course_id = select_record("Course", options, "create_course")
+        session_type = st.selectbox("Session type", ["lecture", "tutorial", "lab", "exam"], format_func=str.capitalize, key="create_type")
+        description = st.text_area("Description (optional)", max_chars=5000, key="create_description")
         start, end = time_inputs("create", tomorrow, tomorrow + timedelta(hours=1))
         venue = venue_inputs("create") if override_venue else {}
-        st.caption("the backend sets check in opening to 15 min before the start and closing to 30 min after start. venue and face requirements are inherited from the course and liveness stays required")
-        submitted = submit_button("CREATE SESSION")
+        st.caption("Check-in: 15 minutes before to 30 minutes after the start. Course verification rules and liveness apply.")
+        submitted = submit_button("Create session")
     if  submitted:
         try:
             if  not name.strip():
@@ -290,7 +377,7 @@ def create_session_form():
                 "scheduled_end": end.isoformat(),
                 **venue,
             })
-            changed("session created and saved in the backend")
+            changed("Session created.")
         except ValueError as exc:
             st.error(str(exc))
         except APIError as exc:
@@ -298,23 +385,23 @@ def create_session_form():
 
 def session_edit_form(session):
     sid = session["id"]
-    with st.expander("EDIT SESSION"):
-        edit_venue = st.checkbox("EDIT VENUE AND GEOFENCE", key=f"edit_venue_{sid}")
+    with st.expander("Edit session"):
+        edit_venue = st.checkbox("Edit venue and geofence", key=f"edit_venue_{sid}")
         with st.form(f"edit_session_{sid}"):
-            name = st.text_input("SESSION NAME", value=session["name"], max_chars=255, key=f"edit_name_{sid}")
-            description = st.text_area("DESCRIPTION", value=session.get("description") or "", max_chars=5000, key=f"edit_description_{sid}")
+            name = st.text_input("Session name", value=session["name"], max_chars=255, key=f"edit_name_{sid}")
+            description = st.text_area("Description", value=session.get("description") or "", max_chars=5000, key=f"edit_description_{sid}")
             types = ["lecture", "tutorial", "lab", "exam"]
-            kind = st.selectbox("SESSION TYPE", types, index=types.index(session["session_type"]), key=f"edit_type_{sid}")
+            kind = st.selectbox("Session type", types, index=types.index(session["session_type"]), format_func=str.capitalize, key=f"edit_type_{sid}")
             venue = venue_inputs(f"edit_{sid}", session) if edit_venue else {}
             times = None
             if  session["status"] == "scheduled":
                 start, end    = time_inputs(f"edit_{sid}",   parse_datetime(session["scheduled_start"]),  parse_datetime(session["scheduled_end"]))
-                opens, closes = time_inputs(f"window_{sid}", parse_datetime(session["checkin_opens_at"]), parse_datetime(session["checkin_closes_at"]), labels=("CHECK-IN OPEN", "CHECK-IN CLOSE"))
+                opens, closes = time_inputs(f"window_{sid}", parse_datetime(session["checkin_opens_at"]), parse_datetime(session["checkin_closes_at"]), labels=("Check-in open", "Check-in close"))
                 st.caption("keep the check-in window overlapping the session")
                 times = (start, end, opens, closes)
             else:
                 st.caption("times can only be changed while a session is scheduled")
-            saved = submit_button("SAVE SESSION CHANGES")
+            saved = submit_button("Save session changes")
         if  saved:
             try:
                 if  not name.strip():
@@ -328,7 +415,7 @@ def session_edit_form(session):
                         if  parse_datetime(session[field]) != value:
                             data[field] = value.isoformat()
                 st.session_state.api.update_session(sid, data)
-                changed("session changes saved in the backend")
+                changed("Session updated.")
             except ValueError as exc:
                 st.error(str(exc))
             except APIError as exc:
@@ -344,9 +431,9 @@ def session_actions(session):
     transitions = TRANSITIONS.get(session["status"], [])
     if  transitions:
         with st.form(f"status_form_{sid}"):
-            status = st.selectbox("NEW STATUS", transitions, key=f"session_status_{sid}")
+            status = st.selectbox("New status", transitions, format_func=str.capitalize, key=f"session_status_{sid}")
             confirm = st.checkbox("I confirm this status change", key=f"confirm_status_{sid}")
-            submitted = submit_button("UPDATE SESSION STATUS")
+            submitted = submit_button("Update session status")
         if  submitted:
             if  not confirm:
                 st.error("confirm the status change first")
@@ -356,7 +443,7 @@ def session_actions(session):
     if  session["status"] == "scheduled":
         with st.form(f"delete_form_{sid}"):
             confirm = st.checkbox("i confirm deletion of this scheduled session", key=f"confirm_delete_{sid}")
-            submitted = submit_button("DELETE SESSION")
+            submitted = submit_button("Delete session")
         if  submitted:
             if  not confirm:
                 st.error("confirm deletion first")
@@ -365,163 +452,207 @@ def session_actions(session):
                 changed("scheduled session deleted")
 
 def sessions_page():
-    st.header("SESSIONS")
-    create_session_form()  # this is to help keep creation reachable even when the session list is empty
-    st.divider()
-    st.subheader("ALL SESSIONS")
-    status   = st.selectbox("SESSION STATUS FILTER", ["all", "scheduled", "active", "closed", "cancelled"], key="sessions_status_filter")
-    number   = page_number("sessions_page", (status,))
-    filters  = {"status": status} if status != "all" else {}
-    response = st.session_state.api.get_sessions(limit=50, offset=(number - 1) * 50, **filters)
-    sessions = response["items"]
-    show_page(response, number, "sessions")
-    dataframe(sessions, ["id", "name", "course_code", "status", "scheduled_start", "scheduled_end"])
-    if  not sessions:
+    page_intro("Sessions", "Your classes, check-in windows and attendance.")
+    with st.expander("Create a session", expanded=False):
+        create_session_form()
+    with panel():
+        st.subheader("All sessions")
+        filter_col, page_col = st.columns([4, 1])
+        with filter_col:
+            status = st.selectbox("Session status filter", ["all", "scheduled", "active", "closed", "cancelled"],
+                                  format_func=lambda value: "All statuses" if value == "all" else value.capitalize(), key="sessions_status_filter")
+        with page_col:
+            number = page_number("sessions_page", (status,))
+        filters = {"status": status} if status != "all" else {}
+        response = st.session_state.api.get_sessions(limit=50, offset=(number - 1) * 50, **filters)
+        sessions = response["items"]
+        show_page(response, number, "sessions")
+        dataframe(sessions, ["id", "name", "course_code", "status", "scheduled_start", "scheduled_end"])
+    if not sessions:
         return
     options = {row["id"]: f"{row['course_code']} — {row['name']} ({row['status']})" for row in sessions}
-    sid = select_record("SELECT A SESSION", options, "selected_session")
+    sid = select_record("Select a session", options, "selected_session")
     session = st.session_state.api.get_session(sid)
-    st.subheader("SESSION DETAILS")
-    cols = st.columns(2)
-    with cols[0]:
-        st.write(f"**SESSION ID:** {sid}")
-        st.write(f"**NAME:** {session['name']}")
-        st.write(f"**COURSE:** {session['course_code']}")
-        st.write(f"**STATUS:** {session['status']}")
-    with cols[1]:
-        st.write(f"**START:** {display_time(session['scheduled_start'])}")
-        st.write(f"**END:** {display_time(session['scheduled_end'])}")
-        st.write(f"**CHECK-IN OPENS:** {display_time(session['checkin_opens_at'])}")
-        st.write(f"**CHECK-IN CLOSES:** {display_time(session['checkin_closes_at'])}")
-    now = datetime.now(LOCAL_TZ)
-    window_open = parse_datetime(session["checkin_opens_at"]) <= now <= parse_datetime(session["checkin_closes_at"])
-    st.info("the session status and check-in window are both open." if session["status"] == "active" and window_open
-            else "attendance requires an active sesssion and the current time inside its check in window")
-    st.caption(f"course activity, enrollment, consent and verification rules are also enforced by module 2")
-    st.caption(f"venue: {session.get('venue_name') or 'Not configured'}, latitude: {session.get('venue_latitude')}, longitude: {session.get('venue_longitude')}; radius: {session.get('geofence_radius_meters')} metres. liveness required: {session['require_liveness_check']}, face match required: {session['require_face_match']}.")
-    session_actions(session)
-    st.subheader("SESSION ATTENDANCE")
-    stats = st.session_state.api.get_session_stats(sid)
-    for col, label, value in zip(st.columns(3), ["ENROLLED", "APPROVED", "ATTENDANCE RATE"],
-                                [stats["total_enrolled"], stats["approved_count"], f"{stats['attendance_rate']:.1%}"]):
-        col.metric(label, value)
-    st.subheader("SESSION EXPORT")
-    prepared_download("SESSION CSV", ("session", sid), lambda: st.session_state.api.export_session(sid),
-                     f"session_{sid}_attendance.csv")
-    st.subheader("SESSION CHECK-INS")
-    checkins = st.session_state.api.get_session_checkins(sid)
-    if  checkins:
-        dataframe(checkins, CHECKIN_COLUMNS)
-    else:
-        st.info("no check-ins are recorded for this session yet")
+    with panel():
+        detail_header(session["name"], session["course_code"], session["status"])
+        metadata([("Starts", display_time(session["scheduled_start"])), ("Ends", display_time(session["scheduled_end"])),
+                  ("Check-in opens", display_time(session["checkin_opens_at"])), ("Check-in closes", display_time(session["checkin_closes_at"]))])
+        now = datetime.now(LOCAL_TZ)
+        window_open = parse_datetime(session["checkin_opens_at"]) <= now <= parse_datetime(session["checkin_closes_at"])
+        st.caption("Check-in is open." if session["status"] == "active" and window_open else "Check-in is not open.")
+    attendance, settings = st.tabs(["Attendance", "Settings"])
+    with attendance:
+        stats = st.session_state.api.get_session_stats(sid)
+        for col, label, value in zip(st.columns(3), ["Enrolled", "Approved", "Attendance rate"],
+                                    [stats["total_enrolled"], stats["approved_count"], f"{stats['attendance_rate']:.1%}"]):
+            col.metric(label, value)
+        with panel():
+            st.subheader("Session check-ins")
+            checkins = st.session_state.api.get_session_checkins(sid)
+            if checkins:
+                dataframe(checkins, CHECKIN_COLUMNS)
+            else:
+                empty_state("No check-ins yet", "Student attendance will appear here.")
+            prepared_download("Session CSV", ("session", sid), lambda: st.session_state.api.export_session(sid),
+                              f"session_{sid}_attendance.csv")
+    with settings:
+        session_actions(session)
+        with st.expander("Venue & verification"):
+            metadata([("Venue", session.get("venue_name") or "Not configured"),
+                      ("Coordinates", f"{session.get('venue_latitude')} / {session.get('venue_longitude')}"),
+                      ("Radius", f"{session.get('geofence_radius_meters')} m"),
+                      ("Liveness required", "Yes" if session["require_liveness_check"] else "No"),
+                      ("Face match required", "Yes" if session["require_face_match"] else "No"), ("Session ID", sid)])
+            st.caption("Course activity, enrollment and consent requirements also apply.")
 
 def checkin_details(checkin_id):
     detail = st.session_state.api.get_checkin(checkin_id)
-    st.subheader("CHECK-IN DETAILS")
-    st.write(f"**STUDENT:** {detail.get('student_name')} ({detail.get('student_email')})")
-    st.write(f"**SESSION:** {detail.get('session_name')} — {detail.get('course_code')}")
-    st.write(f"**STATUS:**  {detail['status']} · **CHECKED IN:** {display_time(detail['checked_in_at'])}")
-    cols = st.columns(3)
-    cols[0].metric("RISK SCORE",       score_text(detail.get("risk_score")))
-    cols[1].metric("LIVENESS SCORE",   score_text(detail.get("liveness_score")))
-    cols[2].metric("FACE MATCH SCORE", score_text(detail.get("face_match_score")))
-    st.write(f"**LIVENESS:** {verification_text(detail.get('liveness_passed'))} · **FACE MATCH:** {verification_text(detail.get('face_match_passed'))}")
-    st.write(f"**LOCATION:** {detail.get('latitude')} / {detail.get('longitude')} · **DISTANCE FROM VENUE:** {detail.get('distance_from_venue_meters')} metres")
-    if  detail.get("risk_factors"):
-        st.write("**RISK FACTORS:**", detail["risk_factors"])
-    if  detail.get("risk_signals"):
-        st.subheader("RISK SIGNALS")
-        dataframe(detail["risk_signals"], ["type", "score", "weight", "details"])
-    if  detail.get("appeal_reason"):
-        st.write("**APPEAL:**", detail["appeal_reason"])
-    if  detail.get("review_notes"):
-        st.write("**REVIEW NOTES:**", detail["review_notes"])
+    detail_header(detail.get("student_name") or "Student", f"{detail.get('session_name')} · {detail.get('course_code')}", detail["status"])
+    for col, label, key in zip(st.columns(3), ["Risk score", "Liveness score", "Face match score"],
+                               ["risk_score", "liveness_score", "face_match_score"]):
+        score = score_text(detail.get(key))
+        col.metric(label, "—" if score == "not recorded" else score)
+    metadata([("Checked in", display_time(detail["checked_in_at"])), ("Student email", detail.get("student_email")),
+              ("Liveness", verification_text(detail.get("liveness_passed"))), ("Face match", verification_text(detail.get("face_match_passed")))])
+    with st.expander("Evidence & history"):
+        metadata([("Location", f"{detail.get('latitude')} / {detail.get('longitude')}"),
+                  ("Distance from venue", f"{detail.get('distance_from_venue_meters')} m")])
+        if detail.get("risk_factors"):
+            st.write("Risk factors", detail["risk_factors"])
+        if detail.get("risk_signals"):
+            dataframe(detail["risk_signals"], ["type", "score", "weight", "details"])
+        if detail.get("appeal_reason"):
+            st.write("Appeal", detail["appeal_reason"])
+        if detail.get("review_notes"):
+            st.write("Previous review", detail["review_notes"])
     if  detail["status"] in {"flagged", "appealed"}:
-        # face photos are never stored, so a doubtful match is settled by fresh live evidence
+        can_recheck, window_message = recheck_availability(detail["session_id"])
+        decisions = ["approved", "rejected"] + ([RECHECK] if can_recheck else [])
+        decision_key = f"decision_{checkin_id}"
+        if  st.session_state.get(decision_key) not in [None, *decisions]:
+            # An expired re-check must never silently turn into an approval.
+            st.session_state[decision_key] = None
+            st.session_state[f"review_confirm_{checkin_id}"] = False
+        st.caption(window_message)
         with st.form(f"review_form_{checkin_id}"):
-            decision = st.selectbox("REVIEW DECISION", ["approved", "rejected", RECHECK], key=f"decision_{checkin_id}",
-                                    help="request re-check sends it back for the student to redo live while the check-in window is open")
-            notes = st.text_area("REVIEW NOTES", max_chars=2000, key=f"notes_{checkin_id}")
+            decision = st.selectbox("Review decision", decisions, index=None, key=decision_key,
+                                    placeholder="Choose a decision",
+                                    format_func=lambda value: "Request re-check" if value == RECHECK else value.capitalize(),
+                                    help="Re-check is available only while the session is active and its check-in window is open.")
+            notes = st.text_area("Review notes", max_chars=2000, height=85, placeholder="Reason for this decision", key=f"notes_{checkin_id}")
             confirm = st.checkbox("I confirm this review decision", key=f"review_confirm_{checkin_id}")
-            submitted = submit_button("SUBMIT REVIEW")
+            submitted = submit_button("Submit review")
         if  submitted:
-            if  not confirm or not notes.strip():
-                st.error("enter review notes and confirm the decision before submitting")
+            if  not decision:
+                st.error("Choose a review decision. The previous re-check option is no longer available.")
+            elif not confirm or not notes.strip():
+                st.error("Enter review notes and confirm the decision before submitting.")
             elif decision == RECHECK:
-                st.session_state.api.reverify_checkin(checkin_id, notes.strip())
-                changed("re-check requested. the student can redo the check-in while the session's window is open.")
+                # Fetch again on submit: the window may have closed while notes were being written.
+                still_open, message = recheck_availability(detail["session_id"])
+                if  not still_open:
+                    st.warning(message)
+                else:
+                    st.session_state.api.reverify_checkin(checkin_id, notes.strip())
+                    changed("Re-check requested. The student can submit again while the check-in window remains open.")
             else:
                 st.session_state.api.review_checkin(checkin_id, decision, notes.strip())
                 changed(f"check-in reviewed as {decision}.")
     elif detail["status"] == "pending":
-        st.info("waiting for the student to redo this check-in (re-check requested)")
+        can_recheck, _ = recheck_availability(detail["session_id"])
+        if  can_recheck:
+            st.info("Waiting for the student to submit a fresh check-in.")
+        else:
+            st.warning("This re-check is pending, but the session is no longer open for resubmission. Contact an administrator to resolve the record.")
     else:
-        st.info("only flagged or appealed check-ins can be reviewed")
+        st.caption("This record has no pending review.")
 
 def checkins_page():
-    st.header("CHECK-INS")
-    api         = st.session_state.api
-    sessions    = api.get_all_sessions()
-    options     = {"all": "ALL AUTHORIZED SESSIONS", **{row["id"]: f"{row['course_code']} — {row['name']}" for row in sessions}}
-    selected    = select_record("SESSION FILTER", options, "checkins_session")
-    session_id  = None if selected == "all" else selected
-    review_only = st.checkbox("SHOW ONLY CHECK-INS AWAITING REVIEW", key="checkins_review_only")
-    status = st.selectbox("STATUS FILTER", ["all", "approved", "flagged", "rejected", "pending", "appealed"], key="checkins_status", disabled=review_only)
-    with st.expander("MORE FILTERS"):
-         use_risk  = st.checkbox("FILTER BY MINIMUM RISK", key="checkins_use_risk", disabled=review_only)
-         min_risk  = st.slider("MINIMUM RISK", 0.0, 1.0, 0.5, 0.05, key="checkins_min_risk", disabled=review_only or not use_risk)
-         use_dates = st.checkbox("FILTER BY DATE RANGE (SGT)", key="checkins_use_dates", disabled=review_only)
-         today     = datetime.now(LOCAL_TZ).date()
-         start     = st.date_input("FROM DATE", value=today - timedelta(days=7), key="checkins_start", disabled=review_only or not use_dates)
-         end       = st.date_input("TO DATE",   value=today,                     key="checkins_end",   disabled=review_only or not use_dates)
-    filters = {}
-    if  not review_only:
-        if  use_risk:
-            filters["min_risk_score"] = min_risk
-        if  use_dates:
-            try:
-                filters.update(date_filters(start, end))
-            except ValueError as exc:
-                st.error(str(exc))
-                return
-    context  = (session_id, review_only, None if review_only else status, tuple(sorted(filters.items())))
-    number   = page_number("checkins_page", context)
+    page_intro("Check-ins", "Attendance records and review decisions.")
+    api = st.session_state.api
+    sessions = api.get_all_sessions()
+    options = {"all": "All authorized sessions", **{row["id"]: f"{row['course_code']} — {row['name']}" for row in sessions}}
+    with panel():
+        session_col, status_col, page_col = st.columns([2.6, 1.5, .8])
+        with session_col:
+            selected = select_record("Session filter", options, "checkins_session")
+        session_id = None if selected == "all" else selected
+        review_only = st.checkbox("Show only check-ins awaiting review", key="checkins_review_only",
+                                  help="Flagged and appealed records, oldest first.")
+        with status_col:
+            status = st.selectbox("Status filter", ["all", "approved", "flagged", "rejected", "pending", "appealed"],
+                                  format_func=lambda value: "All statuses" if value == "all" else STATUS_LABELS[value], key="checkins_status", disabled=review_only)
+        with st.expander("More filters"):
+            risk_col, date_col = st.columns(2)
+            with risk_col:
+                use_risk = st.checkbox("Filter by minimum risk", key="checkins_use_risk", disabled=review_only)
+                min_risk = st.slider("Minimum risk", 0.0, 1.0, 0.5, 0.05, key="checkins_min_risk", disabled=review_only or not use_risk)
+            with date_col:
+                use_dates = st.checkbox("Filter by date range (SGT)", key="checkins_use_dates", disabled=review_only)
+                today = datetime.now(LOCAL_TZ).date()
+                start = st.date_input("From date", value=today - timedelta(days=7), key="checkins_start", disabled=review_only or not use_dates)
+                end = st.date_input("To date", value=today, key="checkins_end", disabled=review_only or not use_dates)
+        filters = {}
+        if not review_only:
+            if use_risk:
+                filters["min_risk_score"] = min_risk
+            if use_dates:
+                try:
+                    filters.update(date_filters(start, end))
+                except ValueError as exc:
+                    st.error(str(exc))
+                    return
+        context = (session_id, review_only, None if review_only else status, tuple(sorted(filters.items())))
+        with page_col:
+            number = page_number("checkins_page", context)
     response = api.get_checkins(status=None if status == "all" else status, session_id=session_id,
-                                review_only=review_only, limit=50, offset=(number - 1) * 50, **filters)
+                               review_only=review_only, limit=50, offset=(number - 1) * 50, **filters)
     rows = response["items"]
-    show_page(response, number, "check-ins")
-    if  review_only:
-        st.caption("the review queue includes flagged and appealed records, oldest first. module 2 supports session filtering for this queue")
-    dataframe(rows, CHECKIN_COLUMNS)
-    if  not rows:
-        return
-    st.download_button("DOWNLOAD DISPLAYED PAGE CSV", data=safe_csv(rows, CHECKIN_COLUMNS),
-                       file_name=f"checkins_page_{number}.csv", mime="text/csv")
-    st.caption("this download contains the displayed page only. use sessions or course attendance for the full gradebook csv")
+    with panel():
+        show_page(response, number, "check-ins")
+        dataframe(rows, CHECKIN_COLUMNS)
+        if not rows:
+            return
+        st.download_button("Download displayed page CSV", data=safe_csv(rows, CHECKIN_COLUMNS),
+                           file_name=f"checkins_page_{number}.csv", mime="text/csv",
+                           help="Exports this page only. Use Sessions or the course gradebook for a full export.")
     detail_options = {row["id"]: f"{row.get('student_name')} — {row.get('session_name')} ({row['status']})" for row in rows}
-    checkin_id = select_record("SELECT A CHECK-IN", detail_options, "selected_checkin")
-    checkin_details(checkin_id)
+    checkin_id = select_record("Select a check-in", detail_options, "selected_checkin")
+    with panel():
+        checkin_details(checkin_id)
 
 def audit_page():
-    st.header("AUDIT LOGS")
+    page_intro("Audit logs", "Account activity and attendance decisions.")
     if  st.session_state.user["role"] != "admin":
-        st.info("the current backend restricts audit logs to administrators. sign in with an administrator account to view this page")
-        return  # no request admin data with an instructor token
+        st.info("Audit logs are restricted to administrators.")
+        return  # Do not request administrator data with an instructor token.
     api = st.session_state.api
     summary = api.get_audit_summary()
-    st.metric("AUDIT EVENTS IN THE LAST 7 DAYS", summary["total_logs"])
-    if  summary.get("by_day"):
-        st.plotly_chart(px.bar(pd.DataFrame(summary["by_day"]), x="date", y="count"), use_container_width=True)
-    with st.expander("FILTER AUDIT LOGS"):
-        action = st.text_input("ACTION (EXACT MATCH)", max_chars=100, key="audit_action").strip()
-        resource_type = st.text_input("RESOURCE TYPE (EXACT MATCH)", max_chars=100, key="audit_resource_type").strip()
-        user_id = st.text_input("USER ID (OPTIONAL UUID)", key="audit_user_id").strip()
-        resource_id = st.text_input("RESOURCE ID (OPTIONAL UUID)", key="audit_resource_id").strip()
-        success = st.selectbox("RESULT", ["all", "successful", "failed"], key="audit_result")
-        use_dates = st.checkbox("FILTER AUDIT DATES (SGT)", key="audit_use_dates")
+    totals, activity = st.columns([1, 3])
+    with totals:
+        st.metric("Events · Last 7 days", summary["total_logs"])
+    with activity:
+        with panel():
+            st.subheader("Audit activity")
+            if summary.get("by_day"):
+                figure = px.bar(pd.DataFrame(summary["by_day"]), x="date", y="count", color_discrete_sequence=[ACCENT])
+                figure.update_xaxes(type="category")  # Keep a single-day series on a date-category axis.
+                figure.update_yaxes(dtick=max(1, math.ceil(max(day["count"] for day in summary["by_day"]) / 4)))
+                figure.update_layout(bargap=.65)
+                chart(figure, height=170)
+            else:
+                empty_state("No audit activity", "Account events will appear here.")
+    with st.expander("Filter audit logs"):
+        action = st.text_input("Action (exact match)", max_chars=100, key="audit_action").strip()
+        resource_type = st.text_input("Resource type (exact match)", max_chars=100, key="audit_resource_type").strip()
+        user_id = st.text_input("User ID (optional UUID)", key="audit_user_id").strip()
+        resource_id = st.text_input("Resource ID (optional UUID)", key="audit_resource_id").strip()
+        success = st.selectbox("Result", ["all", "successful", "failed"],
+                               format_func=lambda value: "All results" if value == "all" else value.capitalize(), key="audit_result")
+        use_dates = st.checkbox("Filter audit dates (SGT)", key="audit_use_dates")
         today = datetime.now(LOCAL_TZ).date()
-        start = st.date_input("FROM DATE", value=today - timedelta(days=7), key="audit_start", disabled=not use_dates)
-        end = st.date_input("TO DATE", value=today, key="audit_end", disabled=not use_dates)
+        start = st.date_input("From date", value=today - timedelta(days=7), key="audit_start", disabled=not use_dates)
+        end = st.date_input("To date", value=today, key="audit_end", disabled=not use_dates)
     filters = {}
     for field, value in [("action", action), ("resource_type", resource_type), ("user_id", user_id), ("resource_id", resource_id)]:
         if  value:
@@ -547,62 +678,73 @@ def audit_page():
     if  rows:
         columns = ["timestamp", "user_email", "action", "resource_type", "resource_id", "severity", "success"]
         frame   = pd.DataFrame(rows).reindex(columns=columns)
-        colours = {"info": "#dbeafe", "warning": "#fef3c7", "error": "#fee2e2", "critical": "#fecaca"}
-        st.dataframe(frame.style.map(lambda value: f"background-color: {colours.get(value, '#f3f4f6')}; color: #111827", subset=["severity"]),
+        frame["timestamp"] = frame["timestamp"].map(display_time)
+        frame = frame.rename(columns={"timestamp": "Time (SGT)", "user_email": "User",
+                                      "action": "Action", "resource_type": "Resource", "resource_id": "Resource ID",
+                                      "severity": "Severity", "success": "Successful"})
+        colours = {"info": "#252a36", "warning": "#3b3225", "error": "#3c2830", "critical": "#462b33"}
+        st.dataframe(frame.style.map(lambda value: f"background-color: {colours.get(value, '#252a36')}; color: #e4dce6", subset=["Severity"]),
                      use_container_width=True, hide_index=True)
-        st.download_button("DOWNLOAD DISPLAYED AUDIT PAGE CSV", data=safe_csv(rows, columns + ["details"]),
+        st.download_button("Download displayed audit page CSV", data=safe_csv(rows, columns + ["details"]),
                             file_name=f"audit_page_{number}.csv", mime="text/csv")
         options = {row["id"]: f"{row['timestamp']} — {row['action']}" for row in rows}
-        selected = select_record("AUDIT EVENT DETAILS", options, "selected_audit_event")
+        selected = select_record("Audit event details", options, "selected_audit_event")
         event = next(row for row in rows if row["id"] == selected)
-        st.json(event["details"])
-        st.caption("details are redacted by module 2. the csv contains the displayed page only")
+        with st.expander("Event details"):
+            st.json(event["details"])
 
 def metrics_page():
-    st.header("METRICS")
-    st.subheader("BACKEND HEALTH")
-    try:
-        health = st.session_state.api.get_health()
-        dataframe([{"Component": field, "State": health.get(field, "unknown")} for field in ["api", "database", "redis"]])
-        if  health.get("status") == "healthy":
-            st.success("the backend health endpoint reports healthy")
-        else:
-            st.warning(f"backend health: {health.get('status', 'unknown')}")
-    except APIError as exc:
-        st.error(
-        str(exc)
-        )
-    st.subheader("HTTP PERFORMANCE (PROMETHEUS)")
+    page_intro("Metrics", "Service health and application performance.")
     prometheus = PrometheusClient(PROMETHEUS_URL)
     try:
         values = [prometheus.scalar(query) for query in QUERIES.values()]
-        for col, (label, value) in zip(st.columns(4), zip(QUERIES, values)):
-            col.metric(label, "No data" if value is None else f"{value:.2f}")
-        st.caption("rates and p95 use the last 5 minutes. missing samples or no traffic can produce no data; this is not a measured zero")
-        dataframe(prometheus.targets())
-        st.markdown(f"[Open Grafana]({os.getenv('GRAFANA_URL', 'http://localhost:3001')})")
+        labels = ["Requests / second", "Successful responses", "Error responses", "Response time · p95"]
+        for index, (col, label, value) in enumerate(zip(st.columns(4), labels, values)):
+            suffix = " req/s" if index == 0 else " ms" if index == 3 else "%"
+            col.metric(label, "—" if value is None else f"{value:.2f}{suffix}",
+                       help="Five-minute window, excluding health checks and monitoring probes. A dash means no measured value is available.")
     except APIError as exc:
-        st.warning(
-        str(exc)
-        )
-    st.subheader("RISK IN RECENT CHECK-INS")
+        st.warning(str(exc))
+    left, right = st.columns([1, 1.25])
+    with left:
+        with panel():
+            st.subheader("Services")
+            try:
+                health = st.session_state.api.get_health()
+                service_states(health)
+                if health.get("status") != "healthy":
+                    st.warning(f"Service health: {health.get('status', 'unknown')}")
+            except APIError as exc:
+                st.error(str(exc))
+            grafana_url = os.getenv("GRAFANA_URL", "http://localhost:3001").rstrip("/")
+            st.link_button("Open Grafana", f"{grafana_url}/d/saiv-operations/saiv-operations?theme=dark", use_container_width=True)
+            with st.expander("Scrape targets"):
+                try:
+                    dataframe(prometheus.targets())
+                except APIError as exc:
+                    st.warning(str(exc))
     recent = st.session_state.api.get_checkins(limit=100)["items"]
-    if  recent:
-        bands = pd.Series([risk_band(row.get("risk_score")) for row in recent]).value_counts().rename_axis("risk").reset_index(name="count")
-        st.plotly_chart(px.bar(bands, x="risk", y="count"), use_container_width=True)
-        st.caption(f"sample of the latest {len(recent)} authorized check-ins. missing scores are shown as not recorded")
-    else:
-        st.info("no check-ins are available for risk analysis yet")
-    st.subheader("HIGH-RISK RECORDS TO INVESTIGATE")
-    alerts = st.session_state.api.get_checkins(min_risk_score=0.5, limit=10)["items"]
-    if  alerts:
-        dataframe(alerts, CHECKIN_COLUMNS)
-        st.caption("latest 10 records with risk ≥0.5, including previously reviewed records. review eligibility is determined by status, not the score alone")
-    else:
-        st.info("no authorized check-ins have risk ≥0.5")
+    with right:
+        with panel():
+            st.subheader("Recent risk")
+            if recent:
+                bands = pd.Series([risk_band(row.get("risk_score")) for row in recent]).value_counts().rename_axis("risk").reset_index(name="count")
+                figure = px.bar(bands, x="risk", y="count", color_discrete_sequence=[ACCENT])
+                figure.update_layout(bargap=.6)
+                chart(figure, height=210)
+                st.caption(f"Latest {len(recent)} check-ins · Missing scores are unrecorded")
+            else:
+                empty_state("No risk data yet", "Scores appear after students check in.")
+    with panel():
+        st.subheader("High-risk check-ins")
+        alerts = st.session_state.api.get_checkins(min_risk_score=0.5, limit=10)["items"]
+        if alerts:
+            dataframe(alerts, CHECKIN_COLUMNS)
+            st.caption("Latest 10 with risk ≥0.5 · Review availability depends on status")
+        else:
+            empty_state("No high-risk records", "No authorized check-ins have a risk score of 0.5 or higher.")
 
-# think streamlit reruns this file on interactions
-# the only explicit form submissions mutate data
+# Mutations require explicit form submission.
 if "api" not in st.session_state:
     st.session_state.api = APIClient(BACKEND_URL)
 skip_submissions = st.session_state.pop("skip_submissions", False)
@@ -612,43 +754,40 @@ if  st.session_state.pop("reset_pages", False):
     for key in list(st.session_state):
         if  key.startswith(("confirm_status_", "confirm_delete_", "review_confirm_")):
             st.session_state[key] = False
-st.title("SAIV INSTRUCTOR DASHBOARD")
+dashboard_style()
 message = st.session_state.pop("auth_message", None)
 if  message:
     st.warning(message)
 if  not st.session_state.api.token:
-    st.subheader("INSTRUCTOR LOGIN")
-    with st.form("login_form", clear_on_submit=True):
-        email = st.text_input("email", key="login_email")
-        password = st.text_input("password", type="password", key="login_password")
-        submitted = st.form_submit_button("Login")
-    if  submitted:
-        try:
-            data = st.session_state.api.login(email.strip(), password)
-            if  data["user"]["role"] not in {"instructor", "admin"}:
-                try:
-                    st.session_state.api.logout()
-                except APIError:
-                    pass  # local tokens are cleared by logout even if revocation fails
-                st.error("an instructor or administrator account is required")
-            else:
-                st.session_state.user = data["user"]
-                st.rerun()
-        except APIError as exc:
-            st.error(
-            str(exc)
-            )
+    _, login_panel, _ = st.columns([1, 1.15, 1])
+    with login_panel:
+        brand()
+        st.title("Welcome back")
+        st.caption("Sign in to your attendance workspace.")
+        with st.form("login_form", clear_on_submit=True):
+            email = st.text_input("Email", key="login_email", placeholder="name@example.com")
+            password = st.text_input("Password", type="password", key="login_password")
+            submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
+        if  submitted:
+            try:
+                data = st.session_state.api.login(email.strip(), password)
+                if  data["user"]["role"] not in {"instructor", "admin"}:
+                    try:
+                        st.session_state.api.logout()
+                    except APIError:
+                        pass  # Logout clears local tokens even if server revocation fails.
+                    st.error("An instructor or administrator account is required.")
+                else:
+                    st.session_state.user = data["user"]
+                    st.rerun()
+            except APIError as exc:
+                st.error(str(exc))
+        st.caption("For instructors and administrators.")
     st.stop()
 
-st.sidebar.title("NAVIGATION")
-page = st.sidebar.radio("GO TO", ["OVERVIEW", "SESSIONS", "CHECK-INS", "AUDIT LOGS", "METRICS"], key="navigation")
-if  st.sidebar.button("LOGOUT"):
-    warning = None
-    try:
-        st.session_state.api.logout()
-    except APIError:
-        warning = "you are signed out here, but backend session cancellation could not be confirmed"
-    reset_login(warning)
+with st.sidebar:
+    brand()
+page = st.sidebar.radio("Navigation", ["Overview", "Sessions", "Check-ins", "Audit logs", "Metrics"], key="navigation", label_visibility="collapsed")
 try:
     user = st.session_state.api.get_current_user()
     if  user["role"] not in {"instructor", "admin"}:
@@ -657,23 +796,33 @@ try:
 except APIError as exc:
     show_error(exc)
     st.stop()
-st.sidebar.caption(f"{user['full_name']} · {user['role']}")
-st.sidebar.caption("Time inputs: Singapore (UTC+08:00)")
-if  st.sidebar.button("REFRESH DATA"):
+st.sidebar.divider()
+with st.sidebar:
+    profile(user["full_name"], user["role"])
+if  st.sidebar.button("Refresh data", use_container_width=True):
     st.session_state.pop("prepared_export", None)
-auto_refresh = st.sidebar.checkbox("AUTO-REFRESH EVERY 30 SECONDS", key="auto_refresh", disabled=st_autorefresh is None)
+auto_refresh = st.sidebar.checkbox("Auto-refresh · 30s", key="auto_refresh", disabled=st_autorefresh is None,
+                                   help="Refreshes Overview, Check-ins and Metrics. Session forms and audit logs stay manual.")
 if  st_autorefresh is None:
-    st.sidebar.caption("use refresh data to update the page")
-if  st_autorefresh is not None and auto_refresh and page in {"OVERVIEW", "CHECK-INS", "METRICS"}:
-    # a browser timer triggers read only reruns and forms do not resubmit on its own
+    st.sidebar.caption("Use Refresh data to update the page.")
+if  st_autorefresh is not None and auto_refresh and page in {"Overview", "Check-ins", "Metrics"}:
+    # Timer reruns do not resubmit forms.
     st_autorefresh(interval=30_000, key=f"refresh_{page}")
+st.sidebar.caption(f"Updated {datetime.now(LOCAL_TZ):%H:%M} SGT")
+if  st.sidebar.button("Sign out", use_container_width=True):
+    warning = None
+    try:
+        st.session_state.api.logout()
+    except APIError:
+        warning = "You are signed out here, but backend session cancellation could not be confirmed."
+    reset_login(warning)
 notice = st.session_state.pop("notice", None)
 if  notice:
     st.success(notice)
 try:
-    {"OVERVIEW": overview_page, "SESSIONS": sessions_page, "CHECK-INS": checkins_page,
-     "AUDIT LOGS": audit_page, "METRICS": metrics_page}[page]()
+    {"Overview": overview_page, "Sessions": sessions_page, "Check-ins": checkins_page,
+     "Audit logs": audit_page, "Metrics": metrics_page}[page]()
 except APIError as exc:
-    # a failed authorisation check would also invalidates any prepared attendance csv
+    # Invalidate prepared exports after an authorization failure.
     st.session_state.pop("prepared_export", None)
     show_error(exc)

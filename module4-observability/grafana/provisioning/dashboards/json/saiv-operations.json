@@ -1,94 +1,467 @@
-
 {
-	"uid":          "saiv-operations",
-	"title":        "SAIV Backend Operations",
+	"uid": "saiv-operations",
+	"title": "SAIV \u00b7 Operations",
+	"description": "Backend HTTP performance. Five-minute rates; refreshes every 30 seconds. Student identities and biometric data are not exported to Prometheus.",
 	"schemaVersion": 39,
-	"version":       1,
-	"editable":      false,
-	"tags":        ["saiv", "module4"],
-	"timezone":     "browser",
-	"refresh":      "30s",
+	"version": 3,
+	"editable": false,
+	"tags": [
+		"saiv",
+		"module4"
+	],
+	"timezone": "browser",
+	"refresh": "30s",
 	"time": {
 		"from": "now-1h",
-		"to":   "now"
+		"to": "now"
 	},
-
 	"panels": [
-	{
-		"id":           1,
-		"type":        "timeseries",
-		"title":       "Backend scrape available",
-		"gridPos":    {"h": 8, "w": 12, "x": 0, "y": 0},
-		"datasource": {"type": "prometheus" , "uid":  "saiv-prometheus"},
-		"targets": [
-			{
-				"expr": "up{job=\"saiv-backend\"}",
-				"refId": "A"
-			}
-		],
-		"fieldConfig": {"defaults": {"unit": "short"} , "overrides": []}
-	},
-
-	{
-		"id":           2,
-		"type":        "timeseries",
-		"title":       "Requests / second",
-		"gridPos":    {"h": 8, "w": 12, "x": 12, "y": 0},
-		"datasource": {"type": "prometheus" , "uid":  "saiv-prometheus"},
-		"targets": [
-			{
-				"expr": "sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
-				"refId": "A"
-			}
-		],
-		"fieldConfig": {"defaults": {"unit": "reqps"} , "overrides": []}
-	},
-
-	{
-		"id":           3,
-		"type":        "timeseries",
-		"title":       "Successful responses (%)",
-		"gridPos":    {"h": 8, "w": 12, "x": 0, "y": 8},
-		"datasource": {"type": "prometheus" , "uid": "saiv-prometheus"},
-		"targets": [
-			{
-				"expr": "100 * sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\",status=~\"2..|3..\"}[5m])) / sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
-				"refId": "A"
-			}
-		],
-		"fieldConfig": {"defaults": {"unit": "percent"} , "overrides": []}
-	},
-
-	{
-		"id":           4,
-		"type":        "timeseries",
-		"title":       "Error responses (%)",
-		"gridPos":    {"h": 8, "w": 12, "x": 12, "y": 8},
-		"datasource": {"type": "prometheus" , "uid": "saiv-prometheus"},
-		"targets": [
-			{
-				"expr": "100 * sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\",status=~\"4..|5..\"}[5m])) / sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
-				"refId": "A"
-			}
-		],
-		"fieldConfig": {"defaults": {"unit": "percent"} , "overrides": []}
-	},
-
-	{
-		"id":           5,
-		"type":        "timeseries",
-		"title":       "Response p95 (ms)",
-		"gridPos":    {"h": 8, "w": 12, "x": 0, "y": 16},
-		"datasource": {"type": "prometheus" , "uid": "saiv-prometheus"},
-		"targets": [
-			{
-				"expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(saiv_http_request_duration_seconds_bucket{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m])))",
-				"refId": "A"
-			}
-		],
-		"fieldConfig": {"defaults": {"unit": "ms"} , "overrides": []}
-	}
-
+		{
+			"id": 1,
+			"title": "Backend scrape",
+			"description": "Prometheus /metrics scrape status. This is not a database, Redis or face-service health check.",
+			"datasource": {
+				"type": "prometheus",
+				"uid": "saiv-prometheus"
+			},
+			"gridPos": {
+				"x": 0,
+				"y": 0,
+				"w": 6,
+				"h": 4
+			},
+			"targets": [
+				{
+					"expr": "up{job=\"saiv-backend\"}",
+					"refId": "A",
+					"legendFormat": "Backend availability",
+					"range": true
+				}
+			],
+			"type": "stat",
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"decimals": 0,
+					"noValue": "\u2014",
+					"color": {
+						"mode": "fixed",
+						"fixedColor": "#B9ACFA"
+					},
+					"mappings": [
+						{
+							"type": "value",
+							"options": {
+								"0": {
+									"text": "Unavailable",
+									"color": "#D89AA6",
+									"index": 0
+								},
+								"1": {
+									"text": "Available",
+									"color": "#9ACBB7",
+									"index": 1
+								}
+							}
+						}
+					],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "#B9ACFA",
+								"value": null
+							}
+						]
+					}
+				},
+				"overrides": []
+			},
+			"options": {
+				"colorMode": "value",
+				"graphMode": "none",
+				"justifyMode": "left",
+				"orientation": "horizontal",
+				"textMode": "value",
+				"wideLayout": true,
+				"reduceOptions": {
+					"values": false,
+					"calcs": [
+						"lastNotNull"
+					],
+					"fields": ""
+				},
+				"text": {
+					"valueSize": 38,
+					"titleSize": 12
+				}
+			},
+			"transparent": false
+		},
+		{
+			"id": 2,
+			"title": "Requests / second",
+			"description": "Five-minute request rate, excluding /health and /metrics.",
+			"datasource": {
+				"type": "prometheus",
+				"uid": "saiv-prometheus"
+			},
+			"gridPos": {
+				"x": 6,
+				"y": 0,
+				"w": 6,
+				"h": 4
+			},
+			"targets": [
+				{
+					"expr": "sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
+					"refId": "A",
+					"legendFormat": "Requests / second",
+					"range": true
+				}
+			],
+			"type": "stat",
+			"fieldConfig": {
+				"defaults": {
+					"unit": "reqps",
+					"decimals": 3,
+					"noValue": "\u2014",
+					"color": {
+						"mode": "fixed",
+						"fixedColor": "#B9ACFA"
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "#B9ACFA",
+								"value": null
+							}
+						]
+					}
+				},
+				"overrides": []
+			},
+			"options": {
+				"colorMode": "none",
+				"graphMode": "none",
+				"justifyMode": "left",
+				"orientation": "horizontal",
+				"textMode": "value",
+				"wideLayout": true,
+				"reduceOptions": {
+					"values": false,
+					"calcs": [
+						"lastNotNull"
+					],
+					"fields": ""
+				},
+				"text": {
+					"valueSize": 38,
+					"titleSize": 12
+				}
+			},
+			"transparent": false
+		},
+		{
+			"id": 3,
+			"title": "Successful responses",
+			"description": "HTTP 2xx and 3xx responses over five minutes.",
+			"datasource": {
+				"type": "prometheus",
+				"uid": "saiv-prometheus"
+			},
+			"gridPos": {
+				"x": 12,
+				"y": 0,
+				"w": 6,
+				"h": 4
+			},
+			"targets": [
+				{
+					"expr": "100 * (sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\",status=~\"2..|3..\"}[5m])) or vector(0)) / sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
+					"refId": "A",
+					"legendFormat": "Successful responses",
+					"range": true
+				}
+			],
+			"type": "stat",
+			"fieldConfig": {
+				"defaults": {
+					"unit": "percent",
+					"decimals": 1,
+					"noValue": "\u2014",
+					"color": {
+						"mode": "fixed",
+						"fixedColor": "#B9ACFA"
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "#B9ACFA",
+								"value": null
+							}
+						]
+					},
+					"min": 0,
+					"max": 100
+				},
+				"overrides": []
+			},
+			"options": {
+				"colorMode": "none",
+				"graphMode": "none",
+				"justifyMode": "left",
+				"orientation": "horizontal",
+				"textMode": "value",
+				"wideLayout": true,
+				"reduceOptions": {
+					"values": false,
+					"calcs": [
+						"lastNotNull"
+					],
+					"fields": ""
+				},
+				"text": {
+					"valueSize": 38,
+					"titleSize": 12
+				}
+			},
+			"transparent": false
+		},
+		{
+			"id": 4,
+			"title": "Error responses",
+			"description": "HTTP 4xx and 5xx responses over five minutes. No traffic is shown as no data, not a measured zero.",
+			"datasource": {
+				"type": "prometheus",
+				"uid": "saiv-prometheus"
+			},
+			"gridPos": {
+				"x": 18,
+				"y": 0,
+				"w": 6,
+				"h": 4
+			},
+			"targets": [
+				{
+					"expr": "100 * (sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\",status=~\"4..|5..\"}[5m])) or vector(0)) / sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
+					"refId": "A",
+					"legendFormat": "Error responses",
+					"range": true
+				}
+			],
+			"type": "stat",
+			"fieldConfig": {
+				"defaults": {
+					"unit": "percent",
+					"decimals": 1,
+					"noValue": "\u2014",
+					"color": {
+						"mode": "fixed",
+						"fixedColor": "#B9ACFA"
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "#B9ACFA",
+								"value": null
+							}
+						]
+					},
+					"min": 0,
+					"max": 100
+				},
+				"overrides": []
+			},
+			"options": {
+				"colorMode": "none",
+				"graphMode": "none",
+				"justifyMode": "left",
+				"orientation": "horizontal",
+				"textMode": "value",
+				"wideLayout": true,
+				"reduceOptions": {
+					"values": false,
+					"calcs": [
+						"lastNotNull"
+					],
+					"fields": ""
+				},
+				"text": {
+					"valueSize": 38,
+					"titleSize": 12
+				}
+			},
+			"transparent": false
+		},
+		{
+			"id": 6,
+			"title": "Request traffic",
+			"description": "Five-minute request rate. Monitoring probes are excluded.",
+			"datasource": {
+				"type": "prometheus",
+				"uid": "saiv-prometheus"
+			},
+			"gridPos": {
+				"x": 0,
+				"y": 4,
+				"w": 12,
+				"h": 10
+			},
+			"targets": [
+				{
+					"expr": "sum(rate(saiv_http_requests_total{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m]))",
+					"refId": "A",
+					"legendFormat": "Request traffic",
+					"range": true
+				}
+			],
+			"type": "timeseries",
+			"fieldConfig": {
+				"defaults": {
+					"unit": "reqps",
+					"decimals": 3,
+					"noValue": "\u2014",
+					"color": {
+						"mode": "fixed",
+						"fixedColor": "#9DAED2"
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "#B9ACFA",
+								"value": null
+							}
+						]
+					},
+					"min": 0,
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"lineWidth": 2,
+						"fillOpacity": 7,
+						"gradientMode": "none",
+						"showPoints": "auto",
+						"pointSize": 4,
+						"spanNulls": false,
+						"axisPlacement": "auto",
+						"axisColorMode": "text",
+						"axisBorderShow": false,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					}
+				},
+				"overrides": []
+			},
+			"options": {
+				"legend": {
+					"showLegend": false
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"transparent": false
+		},
+		{
+			"id": 5,
+			"title": "Response time \u00b7 p95",
+			"description": "95th percentile backend HTTP duration over five minutes, in milliseconds. This is not a separate face-recognition benchmark.",
+			"datasource": {
+				"type": "prometheus",
+				"uid": "saiv-prometheus"
+			},
+			"gridPos": {
+				"x": 12,
+				"y": 4,
+				"w": 12,
+				"h": 10
+			},
+			"targets": [
+				{
+					"expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(saiv_http_request_duration_seconds_bucket{job=\"saiv-backend\",path!~\"/metrics|/health\"}[5m])))",
+					"refId": "A",
+					"legendFormat": "Response time \u00b7 p95",
+					"range": true
+				}
+			],
+			"type": "timeseries",
+			"fieldConfig": {
+				"defaults": {
+					"unit": "ms",
+					"decimals": 2,
+					"noValue": "\u2014",
+					"color": {
+						"mode": "fixed",
+						"fixedColor": "#B9ACFA"
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "#B9ACFA",
+								"value": null
+							}
+						]
+					},
+					"min": 0,
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"lineWidth": 2,
+						"fillOpacity": 7,
+						"gradientMode": "none",
+						"showPoints": "auto",
+						"pointSize": 4,
+						"spanNulls": false,
+						"axisPlacement": "auto",
+						"axisColorMode": "text",
+						"axisBorderShow": false,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					}
+				},
+				"overrides": []
+			},
+			"options": {
+				"legend": {
+					"showLegend": false
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"transparent": false
+		}
 	],
-	"description": "Actual Module 2 HTTP metrics. No student identities or biometric data are sent to Prometheus."
+	"style": "dark"
 }

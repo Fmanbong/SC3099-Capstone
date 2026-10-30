@@ -1,7 +1,5 @@
 
-""" commentary
-- mod 4 HTTP API - backend contracts & safe errors
-"""
+"""HTTP clients for the attendance API and Prometheus."""
 
 import logging , math , os , re , requests
 from contextlib import contextmanager ; from functools import lru_cache
@@ -10,7 +8,7 @@ from contextlib import contextmanager ; from functools import lru_cache
 def _tracer():
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").rstrip("/")
     if  not endpoint:
-        return None  # tracing is optional and attendance does not depend on it
+        return None  # Tracing is optional.
     try:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.resources import Resource
@@ -42,8 +40,7 @@ def request_span(method, endpoint):
          yield span
 
 class APIError(Exception):
-    """ an action error that does not include request bodies or credentials
-    """
+    """API failure with status, request correlation and retry metadata."""
 
     def __init__(self, message, *, status=0, code=None, request_id=None, retry_after=None):
         super().__init__(message)
@@ -53,16 +50,14 @@ class APIError(Exception):
 
 class APIClient:
 
-    """ one client per streamlit session
-    and tokens remain in the server side memory
-    """
+    """HTTP session with in-memory access and refresh tokens."""
 
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
         self.token = None
         self.refresh_token = None
         self.user = None
-        self.timeout = (5, 15)  # the first is connection timeout and then the second is response read timeout
+        self.timeout = (5, 15)  # Connect and read timeouts, in seconds.
         self.session = requests.Session()
 
     def set_token(self, token):
@@ -99,7 +94,7 @@ class APIClient:
                      if  messages:
                          message = "; ".join(messages)[:1200]
         except ValueError:
-            pass  # do not display upstream HTML error or raw response
+            pass  # Suppress upstream HTML and raw error bodies.
         return APIError(
             message , status = response.status_code, code = code,
             request_id = request_id or response.headers.get("X-Request-ID"),
@@ -111,7 +106,7 @@ class APIClient:
         if  authenticated and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:
-            # telemetry records only method/route/status and never headers or payloads
+            # Keep headers and payloads out of tracing attributes.
             with request_span(method, endpoint) as span:
                  response = self.session.request(
                     method, f"{self.base_url}{endpoint}", json=data, params=params, headers=headers, timeout=self.timeout,
@@ -171,7 +166,7 @@ class APIClient:
             data = self._json(self._request(
                 "POST", "/api/v1/auth/refresh", data={"refresh_token": self.refresh_token}, authenticated=False
             ))
-            # refresh tokens rotate . keep the new token and never reuse the old one
+            # Refresh tokens rotate; retain only the new token.
             self._store_tokens(data)
         except APIError as exc:
             self.clear_auth()
@@ -203,7 +198,7 @@ class APIClient:
         return self._request("DELETE", endpoint)
 
     def download(self, endpoint, params=None):
-        # the csv exports cannot be parsed as JSON
+        # CSV exports use the response bytes directly.
         return self._request("GET", endpoint, params=params).content
 
     @staticmethod
@@ -284,7 +279,7 @@ class APIClient:
         return self.post(f"/api/v1/checkins/{checkin_id}/review", {"status": status, "review_notes": review_notes})
 
     def reverify_checkin(self, checkin_id, review_notes):
-        # sends the check-in back as pending so the student redoes it live
+        # Mark attendance pending for a fresh student submission.
         return self.post(f"/api/v1/checkins/{checkin_id}/reverify", {"review_notes": review_notes})
 
     def get_overview_stats(self, course_id=None, days=7):
@@ -321,20 +316,19 @@ class APIClient:
             raise APIError("the health endpoint returned invalid data")
         return data
 
-# PROMETHEUS IS READ ONLY MONITORING SERVICE WHICH IS SEPARATE FROM MOD 2 LOGIN
-# BUT WE USE MOD 2 METRIC NAMES AND EXCLUDE MONITORING PROBES FROM TRAFFIC
+# Exclude health and scrape probes from application traffic metrics.
 TRAFFIC  = 'saiv_http_requests_total{job="saiv-backend",path!~"/metrics|/health"}'
 DURATION = 'saiv_http_request_duration_seconds_bucket{job="saiv-backend",path!~"/metrics|/health"}'
 QUERIES  = {
     "requests / second": f"sum(rate({TRAFFIC}[5m]))",
     "successful responses (%)": (
-        '100 * sum(rate(saiv_http_requests_total{job="saiv-backend",'
-        'path!~"/metrics|/health",status=~"2..|3.."}[5m])) / '
+        '100 * (sum(rate(saiv_http_requests_total{job="saiv-backend",'
+        'path!~"/metrics|/health",status=~"2..|3.."}[5m])) or vector(0)) / '
         f"sum(rate({TRAFFIC}[5m]))"
     ),
     "error responses (%)": (
-        '100 * sum(rate(saiv_http_requests_total{job="saiv-backend",'
-        'path!~"/metrics|/health",status=~"4..|5.."}[5m])) / '
+        '100 * (sum(rate(saiv_http_requests_total{job="saiv-backend",'
+        'path!~"/metrics|/health",status=~"4..|5.."}[5m])) or vector(0)) / '
         f"sum(rate({TRAFFIC}[5m]))"
     ),
     "response p95 (ms)": f"1000 * histogram_quantile(0.95, sum by (le) (rate({DURATION}[5m])))",
