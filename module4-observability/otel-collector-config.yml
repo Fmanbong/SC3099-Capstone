@@ -1,30 +1,4 @@
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
-
-processors:
-  batch:
-    timeout: 10s
-    send_batch_size: 1024
-
-exporters:
-  # The old `logging` exporter was removed from the collector; `debug` replaces it.
-  debug:
-    verbosity: basic
-  prometheus:
-    endpoint: "0.0.0.0:8889"  # 8888 is the collector's own telemetry port
-
-service:
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [debug]
-    metrics:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [prometheus, debug]
+{receivers: {otlp: {protocols: {grpc: {endpoint: "0.0.0.0:4317"}, http: {endpoint: "0.0.0.0:4318"}}}},
+    processors: {batch: {timeout: "10s", send_batch_size: 1024}}, exporters: {debug: {verbosity: "basic"},
+    prometheus: {endpoint: "0.0.0.0:8889"}}, service: {pipelines: {traces: {receivers: [otlp],
+    processors: [batch], exporters: [debug]}, metrics: {receivers: [otlp], processors: [batch], exporters: [prometheus, debug]}}}}
