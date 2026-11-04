@@ -6,14 +6,7 @@
     font-display: swap;
 }
 
-:root {
-    --saiv-bg: #111216;
-    --saiv-panel: #1b1d23;
-    --saiv-line: #2a2d36;
-    --saiv-text: #eceef4;
-    --saiv-muted: #9a9fad;
-    --saiv-accent: #b9acfa;
-}
+:root { --saiv-bg: #111216; --saiv-panel: #1b1d23; --saiv-line: #2a2d36; --saiv-text: #eceef4; --saiv-muted: #9a9fad; --saiv-accent: #b9acfa; }
 
 html, body, [data-testid="stApp"], [data-testid="stAppViewContainer"] {
     font-family: "JetBrains Mono", sans-serif;
@@ -65,12 +58,6 @@ hr { border-color: var(--saiv-line); margin: 1.2rem 0; }
 [data-testid="stSidebar"] [role="radiogroup"] label > div:first-child { display: none; }
 [data-testid="stSidebar"] [role="radiogroup"] label > div:last-child { margin-left: 0; }
 [data-testid="stSidebar"] [role="radiogroup"] label { gap: 11px; }
-[data-testid="stSidebar"] [role="radiogroup"] label::before {
-    content: ""; width: 16px; height: 16px; flex-shrink: 0; background: #9298a8;
-    mask-repeat: no-repeat; mask-position: center; mask-size: 16px;
-    -webkit-mask-repeat: no-repeat; -webkit-mask-position: center; -webkit-mask-size: 16px;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked)::before { background: #d2c6ff; }
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:focus-visible) { outline: 2px solid #b9acfa; outline-offset: 2px; }
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
     background: #262333; border-color: #383149;
@@ -155,12 +142,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
     .saiv-services span { margin: 0; }
 }
 
-[data-testid="stSidebar"] [role="radiogroup"] label:nth-child(1)::before { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3Crect%20x%3D%2214%22%20y%3D%223%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%2214%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3Crect%20x%3D%2214%22%20y%3D%2214%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3C%2Fsvg%3E"); -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3Crect%20x%3D%2214%22%20y%3D%223%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%2214%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3Crect%20x%3D%2214%22%20y%3D%2214%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.5%22%2F%3E%3C%2Fsvg%3E"); }
+[data-testid="InputInstructions"] { text-transform: uppercase; }  /* Capitalize input submission hints */
+.saiv-profile,.saiv-profile *,[data-testid="stHeader"] button,[data-testid="stHeader"] button * { text-transform: uppercase; }  /* Capitalize profile text and header buttons */
 
-[data-testid="stSidebar"] [role="radiogroup"] label:nth-child(2)::before { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%225%22%20width%3D%2218%22%20height%3D%2216%22%20rx%3D%222%22%2F%3E%3Cpath%20d%3D%22M16%203v4M8%203v4M3%2011h18%22%2F%3E%3C%2Fsvg%3E"); -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%225%22%20width%3D%2218%22%20height%3D%2216%22%20rx%3D%222%22%2F%3E%3Cpath%20d%3D%22M16%203v4M8%203v4M3%2011h18%22%2F%3E%3C%2Fsvg%3E"); }
-
-[data-testid="stSidebar"] [role="radiogroup"] label:nth-child(3)::before { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22m8%2012%203%203%205-6%22%2F%3E%3C%2Fsvg%3E"); -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22m8%2012%203%203%205-6%22%2F%3E%3C%2Fsvg%3E"); }
-
-[data-testid="stSidebar"] [role="radiogroup"] label:nth-child(4)::before { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M14%202H6a2%202%200%200%200-2%202v16a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2V8zM14%202v6h6M8%2013h8M8%2017h5%22%2F%3E%3C%2Fsvg%3E"); -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M14%202H6a2%202%200%200%200-2%202v16a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2V8zM14%202v6h6M8%2013h8M8%2017h5%22%2F%3E%3C%2Fsvg%3E"); }
-
-[data-testid="stSidebar"] [role="radiogroup"] label:nth-child(5)::before { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%2012h4l3-8%204%2016%203-8h4%22%2F%3E%3C%2Fsvg%3E"); -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%2012h4l3-8%204%2016%203-8h4%22%2F%3E%3C%2Fsvg%3E"); }
+[data-testid="stMainMenuPopover"],[data-testid="stMainMenuPopover"] * { text-transform: uppercase; }  /* Capitalize the built-in menu labels */
+[data-testid="stModal"],[data-testid="stModal"] * { text-transform: uppercase !important; }  /* Capitalize text in Streamlit popup dialogs */
+[data-testid="stVirtualDropdown"],[data-testid="stVirtualDropdown"] * { text-transform: uppercase !important; }  /* Capitalize options in Streamlit dropdown lists */
+.saiv-status { text-transform: uppercase; }  /* uppercase status badges */
+[data-testid="stTextInput"] input[id*="edit_name_"],[data-testid="stTextArea"] textarea[id*="edit_description_"] { text-transform: uppercase; }  /* uppercase session editing fields only. */
+[data-testid="stTextInput"] input,[data-testid="stTextArea"] textarea,[data-testid="stNumberInput"] input { font-family: "Times New Roman", Times, serif !important; }  /* we want to use times new roman for text entry throughout the dashboard */
+.saiv-services span,.saiv-services strong { text-transform: uppercase; }  /* we uppercase service names and health states */
+[data-testid="stVirtualDropdown"],[data-testid="stVirtualDropdown"] * { font-family: "JetBrains Mono", monospace !important; white-space: pre !important; }  /* use equal-width characters and preserve dropdown alignment */
+[data-testid="stJson"],[data-testid="stJson"] * { text-transform: uppercase; }  /* we uppercase the visible json evidence without modifying its data - this is for visuals and consistency*/

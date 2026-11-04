@@ -1,5 +1,6 @@
 
-"""HTTP clients for the attendance API and Prometheus."""
+""" HTTP clients for the attendance API and Prometheus
+"""
 
 import logging , math , os , re , requests
 from contextlib import contextmanager ; from functools import lru_cache
@@ -8,16 +9,14 @@ from contextlib import contextmanager ; from functools import lru_cache
 def _tracer():
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").rstrip("/")
     if  not endpoint:
-        return None  # Tracing is optional.
+        return None  # note that tracing is optional
     try:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
     except ImportError:
-        logging.getLogger(__name__).warning(
-            "tracing was configured but optional packages are unavailable so tracing is disabled"
-        )
+        logging.getLogger(__name__).warning("TRACING WAS CONFIGURED BUT OPTIONAL PACKAGES ARE UNAVAILABLE SO TRACING IS DISABLED")
         return None
     provider = TracerProvider(resource=Resource.create({"service.name": "saiv-module4"}))
     provider.add_span_processor(BatchSpanProcessor(
@@ -40,7 +39,8 @@ def request_span(method, endpoint):
          yield span
 
 class APIError(Exception):
-    """API failure with status, request correlation and retry metadata."""
+    """ FOR API FAILURE WITH STATUS , REQUEST CORRELATION , AND RETRY METADATA
+    """
 
     def __init__(self, message, *, status=0, code=None, request_id=None, retry_after=None):
         super().__init__(message)
@@ -50,14 +50,14 @@ class APIError(Exception):
 
 class APIClient:
 
-    """HTTP session with in-memory access and refresh tokens."""
+    """HTTP session with in-memory access and refresh tokens"""
 
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
         self.token = None
         self.refresh_token = None
         self.user = None
-        self.timeout = (5, 15)  # Connect and read timeouts, in seconds.
+        self.timeout = (5, 15)  # connect and read timeouts in seconds
         self.session = requests.Session()
 
     def set_token(self, token):
@@ -70,13 +70,13 @@ class APIClient:
     @staticmethod
     def _error(response):
         defaults = {
-            401: "your login has expired. sign in again",
-            403: "your account does not have permission for this action",
-            404: "the requested record no longer exists",
-            429: "too many requests. wait before trying again",
-            503: "a required backend service is unavailable",
+            401: "YOUR LOGIN HAS EXPIRED. PLEASE SIGN IN AGAIN",
+            403: "YOUR ACCOUNT DOES NOT HAVE PERMISSION FOR THIS ACTION",
+            404: "THE REQUESTED RECORD NO LONGER EXISTS",
+            429: "TOO MANY REQUESTS. PLEASE WAIT BEFORE TRYING AGAIN",
+            503: "A REQUIRED BACKEND SERVICE IS UNAVAILABLE",
         }
-        message = defaults.get(response.status_code, "the backend could not complete the request")
+        message = defaults.get(response.status_code, "THE BACKEND COULD NOT COMPLETE THE REQUEST")
         code = request_id = None
         try:
             body = response.json()
@@ -94,11 +94,9 @@ class APIClient:
                      if  messages:
                          message = "; ".join(messages)[:1200]
         except ValueError:
-            pass  # Suppress upstream HTML and raw error bodies.
-        return APIError(
-            message , status = response.status_code, code = code,
-            request_id = request_id or response.headers.get("X-Request-ID"),
-            retry_after = response.headers.get("Retry-After"),
+            pass  # to suppress upstream HTML and raw error bodies
+        return APIError(message, status = response.status_code, code = code, request_id = request_id or response.headers.get("X-Request-ID"),
+            retry_after = response.headers.get("Retry-After")
         )
 
     def _request(self, method, endpoint, *, data=None, params=None, authenticated=True, retry_auth=True, allowed_statuses=()):
@@ -106,7 +104,7 @@ class APIClient:
         if  authenticated and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:
-            # Keep headers and payloads out of tracing attributes.
+            # to keep headers and payloads out of tracing attributes
             with request_span(method, endpoint) as span:
                  response = self.session.request(
                     method, f"{self.base_url}{endpoint}", json=data, params=params, headers=headers, timeout=self.timeout,
@@ -115,11 +113,11 @@ class APIClient:
                      span.set_attribute("http.status_code", response.status_code)
         except requests.Timeout:
             raise APIError(
-                "the backend request timed out. for the create , edit or review , "
-                "refresh the records before submitting again and the action may have completed",
+                "THE BACKEND REQUEST TIMED OUT. FOR THE CREATE , EDIT OR REVIEW , "
+                "TRY REFRESH THE RECORDS BEFORE SUBMITTING AGAIN AND THE ACTION MAY HAVE COMPLETED",
                 code="TIMEOUT") from None
         except requests.RequestException:
-            raise APIError("cannot reach the backend. check that it is running", code="CONNECTION_ERROR") from None
+            raise APIError("CANNOT REACH THE BACKEND. CHECK THAT IT IS RUNNING", code="CONNECTION_ERROR") from None
 
         if  response.status_code == 401 and authenticated:
             if  retry_auth and self.refresh_token:
@@ -137,12 +135,12 @@ class APIClient:
         try:
             return response.json()
         except ValueError:
-            raise  APIError("the backend returned an invalid JSON response", code="INVALID_RESPONSE") from None
+            raise  APIError("THE BACKEND RETURNED AN INVALID JSON RESPONSE", code="INVALID_RESPONSE") from None
 
     def _store_tokens(self, data):
         if  not isinstance(data, dict) or not isinstance(data.get("access_token"), str):
             self.clear_auth()
-            raise APIError("the backend returned an invalid login response", code="INVALID_RESPONSE")
+            raise APIError("THE BACKEND RETURNED AN INVALID LOGIN RESPONSE", code="INVALID_RESPONSE")
         self.token = data["access_token"]
         self.refresh_token = data.get("refresh_token")
 
@@ -154,24 +152,23 @@ class APIClient:
         self._store_tokens(data)
         if  not isinstance(data.get("user"), dict):
             self.clear_auth()
-            raise APIError("the login response has no user profile", code="INVALID_RESPONSE")
+            raise APIError("THE LOGIN RESPONSE HAS NO USER PROFILE", code="INVALID_RESPONSE")
         self.user = data["user"]
         return data
 
     def refresh(self):
         if  not self.refresh_token:
             self.clear_auth()
-            raise APIError("your login has expired. sign in again", status=401)
+            raise APIError("YOUR LOGIN HAS EXPIRED. PLEASE SIGN IN AGAIN", status=401)
         try:
             data = self._json(self._request(
                 "POST", "/api/v1/auth/refresh", data={"refresh_token": self.refresh_token}, authenticated=False
             ))
-            # Refresh tokens rotate; retain only the new token.
+            # note that refresh tokens rotate and retain only the new token
             self._store_tokens(data)
         except APIError as exc:
             self.clear_auth()
-            raise APIError("your login could not be renewed. sign in again", status=401,
-                            code=exc.code, request_id=exc.request_id) from None
+            raise APIError("YOUR LOGIN COULD NOT BE RENEWED. PLEASE SIGN IN AGAIN", status=401, code=exc.code, request_id=exc.request_id) from None
         return data
 
     def logout(self):
@@ -198,14 +195,14 @@ class APIClient:
         return self._request("DELETE", endpoint)
 
     def download(self, endpoint, params=None):
-        # CSV exports use the response bytes directly.
+        # CSV exports use the response bytes directly
         return self._request("GET", endpoint, params=params).content
 
     @staticmethod
     def page(data):
         if (not isinstance(data, dict) or not isinstance(data.get("items"), list)
                 or not isinstance(data.get("total"), int)):
-            raise APIError("the backend returned an invalid paginated response", code="INVALID_RESPONSE")
+            raise APIError("THE BACKEND RETURNED AN INVALID PAGINATED RESPONSE", code="INVALID_RESPONSE")
         return data
 
     def _all_pages(self, endpoint, params=None):
@@ -218,7 +215,7 @@ class APIClient:
             if  not data["items"]:
                 break
             offset += len(data["items"])
-        raise APIError("the full selector list could not be loaded. try refreshing or use a narrower scope")
+        raise APIError("THE FULL SELECTOR LIST COULD NOT BE LOADED. TRY REFRESHING OR USE A NARROWER SCOPE")
 
     def get_courses(self, instructor_id=None, limit=100, offset=0):
         params = {"limit": limit, "offset": offset}
@@ -269,7 +266,7 @@ class APIClient:
     def get_session_checkins(self, session_id):
         data = self.get(f"/api/v1/checkins/session/{session_id}")
         if  not isinstance(data, list):
-            raise APIError("the backend returned an invalid session check in list")
+            raise APIError("THE BACKEND RETURNED AN INVALID SESSION CHECK IN LIST")
         return data
 
     def get_flagged_checkins(self, **filters):
@@ -279,7 +276,7 @@ class APIClient:
         return self.post(f"/api/v1/checkins/{checkin_id}/review", {"status": status, "review_notes": review_notes})
 
     def reverify_checkin(self, checkin_id, review_notes):
-        # Mark attendance pending for a fresh student submission.
+        # mark attendance pending for a fresh student submission
         return self.post(f"/api/v1/checkins/{checkin_id}/reverify", {"review_notes": review_notes})
 
     def get_overview_stats(self, course_id=None, days=7):
@@ -316,7 +313,7 @@ class APIClient:
             raise APIError("the health endpoint returned invalid data")
         return data
 
-# Exclude health and scrape probes from application traffic metrics.
+# to exclude health and scrape probes from application traffic metrics
 TRAFFIC  = 'saiv_http_requests_total{job="saiv-backend",path!~"/metrics|/health"}'
 DURATION = 'saiv_http_request_duration_seconds_bucket{job="saiv-backend",path!~"/metrics|/health"}'
 QUERIES  = {
@@ -345,9 +342,9 @@ class PrometheusClient:
             response.raise_for_status()
             data = response.json()
         except (requests.RequestException, ValueError):
-            raise APIError("prometheus is unavailable. attendance pages can still be used") from None
+            raise APIError("PROMETHEUS IS UNAVAILABLE. ATTENDANCE PAGES CAN STILL BE USED") from None
         if  not isinstance(data, dict) or data.get("status") != "success":
-            raise APIError("prometheus returned an invalid query result")
+            raise APIError("PROMETHEUS RETURNED AN INVALID QUERY RESULT")
         return data.get("data", {})
 
     def scalar(self, query):
@@ -358,15 +355,17 @@ class PrometheusClient:
         try:
             value = float(values[0]["value"][1])
         except (ValueError, TypeError, KeyError, IndexError):
-            raise APIError("prometheus returned an invalid metric value") from None
+            raise APIError("PROMETHEUS RETURNED AN INVALID METRIC VALUE") from None
         return value if math.isfinite(value) else None
 
     def targets(self):
         data = self._get("/api/v1/targets", {"state": "active"})
         return [
-            {"Job": item.get("labels", {}).get("job", "Unknown"),
-             "Health": item.get("health", "unknown"),
-             "Last scrape": item.get("lastScrape"),
-             "Error": item.get("lastError", "")}
+            {
+                "JOB": item.get("labels", {}).get("job", "Unknown"),
+                "HEALTH": item.get("health", "unknown"),
+                "LAST SCRAPE": item.get("lastScrape"),
+                "ERROR": item.get("lastError", "")
+            }
             for item in data.get("activeTargets", [])
         ]
