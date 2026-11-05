@@ -54,34 +54,34 @@ os.environ.pop('OTEL_EXPORTER_OTLP_ENDPOINT', None)
 
 now = utcnow()
 with app.state.session_factory() as db:
-    users = {}
-    for role in ['admin', 'instructor', 'student']:
-        users[role] = User(email=f'{role}@review.example.com', full_name=f'Review {role}',
-                           hashed_password=hash_password('ReviewPassword123!'), role=role,
-                           camera_consent=True, geolocation_consent=True)
-        db.add(users[role])
-    db.flush()
-    course = Course(code='REVIEW1', name='Review course', semester='2026', require_face_recognition=False, require_device_binding=False,
-                    venue_latitude=1.3483, venue_longitude=103.6831)
-    foreign_course = Course(code='OTHER1', name='Other staff course', semester='2026')
-    db.add_all([course, foreign_course]) ; db.flush() ; db.add(CourseStaff(course_id=course.id, user_id=users['instructor'].id))
-    db.add(Enrollment(course_id=course.id, student_id=users['student'].id, enrolled_at=now - timedelta(days=1)))
+     users = {}
+     for role in ['admin', 'instructor', 'student']:
+         users[role] = User(email=f'{role}@review.example.com', full_name=f'Review {role}',
+                            hashed_password=hash_password('ReviewPassword123!'), role=role,
+                            camera_consent=True, geolocation_consent=True)
+         db.add(users[role])
+     db.flush()
+     course = Course(code='REVIEW1', name='Review course', semester='2026', require_face_recognition=False, require_device_binding=False,
+                     venue_latitude=1.3483, venue_longitude=103.6831)
+     foreign_course = Course(code='OTHER1', name='Other staff course', semester='2026')
+     db.add_all([course, foreign_course]) ; db.flush() ; db.add(CourseStaff(course_id=course.id, user_id=users['instructor'].id))
+     db.add(Enrollment(course_id=course.id, student_id=users['student'].id, enrolled_at=now - timedelta(days=1)))
 
-    session = Session(course_id=course.id, instructor_id=users['instructor'].id, name='Review active session', session_type='lecture', status='active',
-                      scheduled_start=now - timedelta(minutes=5), scheduled_end=now + timedelta(hours=1),
-                      checkin_opens_at=now - timedelta(minutes=10), checkin_closes_at=now + timedelta(minutes=30), require_liveness_check=False, require_face_match=False)
+     session = Session(course_id=course.id, instructor_id=users['instructor'].id, name='Review active session', session_type='lecture', status='active',
+                       scheduled_start=now - timedelta(minutes=5), scheduled_end=now + timedelta(hours=1),
+                       checkin_opens_at=now - timedelta(minutes=10), checkin_closes_at=now + timedelta(minutes=30), require_liveness_check=False, require_face_match=False)
 
-    foreign = Session(course_id=foreign_course.id, instructor_id=users['admin'].id, name='Foreign session', session_type='lecture', status='active',
-                      scheduled_start=now - timedelta(minutes=5), scheduled_end=now + timedelta(hours=1),
-                      checkin_opens_at=now - timedelta(minutes=10), checkin_closes_at=now + timedelta(minutes=30))
-    db.add_all([session, foreign]); db.flush()
+     foreign = Session(course_id=foreign_course.id, instructor_id=users['admin'].id, name='Foreign session', session_type='lecture', status='active',
+                       scheduled_start=now - timedelta(minutes=5), scheduled_end=now + timedelta(hours=1),
+                       checkin_opens_at=now - timedelta(minutes=10), checkin_closes_at=now + timedelta(minutes=30))
+     db.add_all([session, foreign]); db.flush()
 
-    flagged = CheckIn(session_id=session.id, student_id=users['student'].id,
-                      checked_in_at=now, status='flagged', risk_score=.55,
-                      risk_factors=[{'type': 'face_match_uncertain', 'score': .55}])
-    db.add(flagged); db.commit()
+     flagged = CheckIn(session_id=session.id, student_id=users['student'].id,
+                       checked_in_at=now, status='flagged', risk_score=.55,
+                       risk_factors=[{'type': 'face_match_uncertain', 'score': .55}])
+     db.add(flagged); db.commit()
 
-    sid, fid, cid, checkid = session.id, foreign.id, course.id, flagged.id
+     sid, fid, cid, checkid = session.id, foreign.id, course.id, flagged.id
 
 checks = []
 def passed(message):

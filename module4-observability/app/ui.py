@@ -15,8 +15,8 @@ def apply_theme():
 @contextmanager
 def panel():
     with st.container(border=True):
-        st.markdown('<span class="saiv-panel-anchor" aria-hidden="true"></span>', unsafe_allow_html=True)
-        yield
+         st.markdown('<span class="saiv-panel-anchor" aria-hidden="true"></span>', unsafe_allow_html=True)
+         yield
 
 def brand():
     st.markdown('''<div class="saiv-brand"><span class="saiv-mark" aria-hidden="true">s</span>
