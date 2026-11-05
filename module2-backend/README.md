@@ -93,11 +93,18 @@ and the owning instructor manage sessions; TAs have scoped review/read access.
   invalidate affected login sessions. Only refresh-token digests are persisted.
 - Passwords use bcrypt. No password hashes, face hashes or device public keys
   appear in ordinary resource responses.
-- Redis atomically limits login to 60/hour/IP, registration to 10/hour/IP,
+- Ten consecutive incorrect passwords lock an existing account: the first nine
+  failures return 401, the tenth and all later login attempts return 429
+  (`ACCOUNT_LOCKED`), including attempts with the correct password. Successful
+  login before lockout resets the counter. This state is persisted in PostgreSQL,
+  independent of IP quotas and public-test compatibility, with no automatic expiry.
+- Redis atomically limits login and registration to 100,000/hour/IP,
   authenticated API traffic to 1,000/hour/user, and check-ins to 10/minute/user.
   Exceeding a limit returns 429 with `Retry-After`; a protection-service outage
-  returns 503. Reverse-proxy forwarded headers must only be trusted from your
-  configured proxy, never arbitrary clients.
+  returns 503. Login/registration quotas remain active in public-test mode.
+  Per the grading contract, client IP is the first `X-Forwarded-For` entry when
+  present, otherwise the socket address. A deployment proxy should overwrite
+  incoming forwarded headers so callers cannot choose a false client address.
 - Errors use `{"detail":...,"code":...,"request_id":...}`. Validation failures
   list all field errors without echoing request input. Responses carry
   `X-Request-ID`; server error logs contain stack locations without request bodies,
@@ -112,6 +119,34 @@ and the owning instructor manage sessions; TAs have scoped review/read access.
   only the foreign-key unlink when a referenced user is actually removed.
 - `/health` checks the database schema and Redis. `/metrics` exposes Prometheus
   request counts/durations using route patterns, without user identifiers.
+
+### Account migration and recovery
+
+Run `alembic upgrade head` before starting an updated backend (the Docker command
+already does this). Migration `0004_login_failures` adds the failure counter with
+zero as the default for existing users. The API has no automatic unlock or unlock
+UI. After investigating a lockout, a database operator can explicitly reset
+`users.failed_login_attempts` to zero for the selected account, for example:
+
+```bash
+docker compose exec postgres psql -U saiv -d saiv -c "UPDATE users SET failed_login_attempts = 0 WHERE email = 'student@example.com';"
+```
+
+### Singapore-only attendance
+
+Every check-in must pass both offline country checks before session/face processing:
+GPS inside Singapore's land polygons and a Singapore public IP or ordinary
+private/local IPv4/IPv6 address. Outside GPS returns 403 `GPS_OUTSIDE_SINGAPORE`;
+outside/noneligible IP returns 403 `IP_OUTSIDE_SINGAPORE`; invalid client-IP syntax
+returns 403 `CLIENT_IP_INVALID`. The first forwarded address takes precedence over
+the socket, including for the IP passed downstream to Module 3. Private IPs never
+bypass GPS. These gates apply in public-test mode and with face checks disabled;
+the classroom geofence still applies afterward.
+
+The source data ships under `app/data`; there is no runtime GeoIP network request
+or extra environment variable. Missing/corrupt data prevents startup. See
+[data notices and update instructions](app/data/NOTICE.md) for licenses, checksums,
+monthly IP refreshes, boundary provenance and accuracy/reclaimed-land limitations.
 
 ## Module 1 / 3 / 4 integration
 

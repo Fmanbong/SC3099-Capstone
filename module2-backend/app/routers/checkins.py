@@ -125,6 +125,7 @@ def submit_checkin(
     user=Depends(require_roles("student")),
 ):
     settings = request.app.state.settings
+    client_host = request.app.state.singapore_policy.require_singapore(request, body.latitude, body.longitude)
     now = utcnow()
     request.app.state.limiter.check(f"checkin:{user.id}", 10, 60)
     session, course = _session_course(db, str(body.session_id))
@@ -296,7 +297,6 @@ def submit_checkin(
     )
     risk_score = local_score
     if liveness_result is not None or face_result is not None:
-        client_host = request.client.host if request.client else None
         assessed = request.app.state.face_client.assess(
             {
                 "liveness_score": liveness_score,

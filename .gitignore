@@ -11,6 +11,7 @@ node_modules/
 *.egg-info/
 student-starter/
 .env
+.demo/
 *.db
 *.db-shm
 *.db-wal

@@ -59,13 +59,13 @@ def test_redis_counter_is_atomic_with_expiry(real_limiter):
 
 def test_real_login_quota_and_outage_response(settings, real_limiter):
     app = create_app(settings)
-    with TestClient(app) as client:
+    with TestClient(app, headers={'X-Forwarded-For': '127.0.0.1'}) as client:
         original = app.state.limiter
         app.state.limiter = real_limiter
-        identifier = 'login:unknown'
+        identifier = 'login:127.0.0.1'
         key = key_for(identifier, 3600)
         try:
-            real_limiter.redis.set(key, 59, ex=3600)
+            real_limiter.redis.set(key, 99_999, ex=3600)
             body = {'email': 'missing@example.com', 'password': 'not-a-password'}
             assert client.post('/api/v1/auth/login', json=body).status_code == 401
             response = client.post('/api/v1/auth/login', json=body)
@@ -121,7 +121,7 @@ def test_postgresql_concurrent_checkin_and_refresh_reuse(settings):
         pytest.skip('Set SAIV_TEST_DATABASE_URL to a migrated test PostgreSQL database')
     settings = settings.model_copy(update={'database_url': url, 'auto_create_schema': False})
     app = create_app(settings)
-    with TestClient(app) as client:
+    with TestClient(app, headers={'X-Forwarded-For': '127.0.0.1'}) as client:
         with app.state.session_factory() as db:
             user = User(email=f'{uuid4()}@example.com', full_name='Concurrent Student',
                         hashed_password='not-used-for-login', geolocation_consent=True)

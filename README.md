@@ -18,7 +18,7 @@ Welcome to the SAIV capstone project! Your team will build a secure, privacy-pre
 ### Project Scope
 - **Duration**: 12-14 weeks
 - **Team Size**: 4 students (1 per module)
-- **Grading**: 130 points total (90 public + 40 hidden)
+- **Grading**: 92 public-test points, plus hidden tests (see instructor clarifications)
 
 ---
 
@@ -146,7 +146,7 @@ python3 -m pytest tests/public/test_observability.py -v
 python3 -m pytest tests/public/test_integration.py -v
 
 # The scoring plugin shows a summary at the end:
-# TOTAL SCORE: 90.0/90.0 (100.0%)
+# TOTAL SCORE: 92.0/92.0 (100.0%)
 # LETTER GRADE: A
 ```
 
@@ -189,11 +189,11 @@ Some packages require system-level dependencies:
 
 ## Grading Breakdown
 
-### Public Tests (90 points) - Available to you
+### Public Tests (92 points) - Available to you
 
 | Test File | Points | Description |
 |-----------|--------|-------------|
-| test_api_functional.py | 26 | API endpoints, auth, CRUD operations |
+| test_api_functional.py | 28 | API endpoints, auth, CRUD operations |
 | test_face_recognition.py | 15 | Face enrollment, matching, risk assessment |
 | test_security_basic.py | 12 | JWT auth, input validation, rate limiting |
 | test_privacy_basic.py | 8 | Consent, data minimization, retention |
@@ -232,7 +232,7 @@ student-starter/
 ├── module3-face-recognition/  # ML service (your implementation)
 ├── module4-observability/     # Dashboard (your implementation)
 ├── tests/
-│   ├── public/                # Public test suite (90 points)
+│   ├── public/                # Public test suite (92 points)
 │   └── scoring/               # Pytest scoring plugin
 ├── docs/
 │   ├── API-SPECIFICATION.md

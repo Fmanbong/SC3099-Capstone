@@ -547,6 +547,10 @@ export default function CheckinPage() {
           <p className="page-subtitle">Pick an open session to mark your attendance.</p>
         </div>
         <CheckinFlow />
+        <p className="text-xs text-slate-500">
+          IP Geolocation by <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="underline">DB-IP</a>.
+          {' '}Singapore boundary data: <a href="https://www.geoboundaries.org" target="_blank" rel="noreferrer" className="underline">geoBoundaries</a> / URA.
+        </p>
       </main>
     </ProtectedRoute>
   )

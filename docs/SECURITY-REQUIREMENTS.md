@@ -79,10 +79,26 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 | Endpoint Category | Limit | Window | Key |
 |-------------------|-------|--------|-----|
-| Login attempts | 60 | 1 hour | IP address |
+| Login attempts | 100,000 | 1 hour | IP address |
 | API requests | 1000 | 1 hour | User ID |
 | Check-in attempts | 10 | 1 minute | User ID |
-| Registration | 10 | 1 hour | IP address |
+| Registration | 100,000 | 1 hour | IP address |
+
+Account lockout is independent of these traffic quotas. Ten consecutive incorrect
+passwords on the same existing account cause lockout and HTTP 429; later attempts
+also return 429, including the correct password. Success before lockout resets
+the count. Store the counter persistently and serialize concurrent login updates.
+There is no automatic expiry. Apply the rule and the IP quotas in public-test mode.
+
+### Singapore-only check-ins
+
+Reject a check-in with HTTP 403 when GPS lies outside Singapore or a public client
+IP is outside the bundled Singapore IP ranges. Private/local addresses may pass
+the IP check, but do not bypass GPS. Use the first `X-Forwarded-For` entry when
+present, falling back to the socket address. Invalid addresses are rejected.
+Enforce these checks in Module 2 independently of the optional face/risk service
+and the separate classroom geofence. See
+[offline data provenance and updates](../module2-backend/app/data/NOTICE.md).
 
 **Implementation with Redis:**
 ```python

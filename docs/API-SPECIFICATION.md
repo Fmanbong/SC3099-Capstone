@@ -80,6 +80,10 @@ Login to receive JWT tokens.
 **Error Responses:**
 - `401 Unauthorized`: Invalid credentials
 - `403 Forbidden`: Account disabled
+- `429 Too Many Requests`: Account locked after 10 consecutive incorrect passwords,
+  or the per-IP quota exceeded (100,000/hour). The tenth failure locks the account;
+  later attempts with any password return 429. A successful login before lockout
+  resets the consecutive count. Lockout has no automatic expiry.
 
 #### POST /auth/refresh
 Refresh access token.
@@ -505,6 +509,12 @@ Only sessions with status `scheduled` can be deleted. Active or closed sessions 
 Check-ins record student attendance at sessions.
 
 #### POST /checkins/
+All check-ins require GPS within Singapore's offline land boundary and either a
+Singapore public IP or private/local address. Outside GPS or IP returns HTTP 403,
+even when face checks are disabled or public-test compatibility is enabled.
+The client IP is the first `X-Forwarded-For` address when supplied, otherwise the
+socket address; malformed addresses return 403. Private IPs do not bypass GPS.
+
 Student check-in to a session. **Requires auth (student only).**
 
 **Request:**

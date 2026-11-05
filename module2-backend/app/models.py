@@ -25,6 +25,7 @@ class User(Identified, Timestamps, Base):
     email = Column(String(255), unique=True, nullable=False)
     full_name = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    failed_login_attempts = Column(Integer, default=0, server_default='0', nullable=False)
     role = Column(String(20), default='student', nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     camera_consent = Column(Boolean, default=False, nullable=False)

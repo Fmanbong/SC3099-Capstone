@@ -99,6 +99,8 @@ def create_app(settings=None, *, face_client=None):
     @asynccontextmanager
     async def lifespan(app):
         settings.validate_startup()
+        from app.services.singapore import default_policy
+        app.state.singapore_policy = default_policy()
         if settings.auto_create_schema:
             Base.metadata.create_all(engine)
             from app.services.audit_guards import install_audit_guards

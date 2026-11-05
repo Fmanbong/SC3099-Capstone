@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "files": {
+    "singapore-ip-ranges.json": "47c2fdcfe4fdf9c7a13a7ae39953a7b76783d0f5a13a8b6285d3622ee6f9ec24",
+    "singapore-boundary.geojson": "d347c753ec38568609f9414da6b85ec46d2a776d1a3c99b9634822735a335c38"
+  },
+  "ip_source": {
+    "url": "https://download.db-ip.com/free/dbip-country-lite-2026-11.csv.gz",
+    "sha256": "e5c8459d638a272ece7f4d7cfa49dce18d91b4f403f6940ba9249bf0db3781fd",
+    "release": "2026-11",
+    "license": "CC-BY-4.0",
+    "attribution": "IP Geolocation by DB-IP.com"
+  },
+  "boundary_source": {
+    "url": "https://www.geoboundaries.org/api/current/gbOpen/SGP/ADM0/",
+    "download_url": "https://media.githubusercontent.com/media/wmgeolab/geoBoundaries/9469f09/releaseData/gbOpen/SGP/ADM0/geoBoundaries-SGP-ADM0.geojson",
+    "boundary_year": "2016",
+    "sha256": "d347c753ec38568609f9414da6b85ec46d2a776d1a3c99b9634822735a335c38",
+    "license": "ODbL-1.0",
+    "attribution": "geoBoundaries; Urban Redevelopment Authority, Singapore"
+  }
+}

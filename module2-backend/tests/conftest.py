@@ -32,14 +32,15 @@ def settings(tmp_path):
 @pytest.fixture
 def client(settings):
     app = create_app(settings, face_client=UnavailableFaceService())
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={'X-Forwarded-For': '127.0.0.1'}) as test_client:
         yield test_client
 
 
 @pytest.fixture
 def compat_client(settings, tmp_path):
     config = settings.model_copy(update={'public_test_mode': True, 'database_url': f'sqlite:///{tmp_path}/compat.db'})
-    with TestClient(create_app(config, face_client=UnavailableFaceService())) as test_client:
+    with TestClient(create_app(config, face_client=UnavailableFaceService()),
+                    headers={'X-Forwarded-For': '127.0.0.1'}) as test_client:
         yield test_client
 
 
