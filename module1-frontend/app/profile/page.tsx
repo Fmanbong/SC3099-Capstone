@@ -7,7 +7,7 @@ import Spinner from '@/components/Spinner'
 import { MonitorIcon, PhoneIcon } from '@/components/icons'
 import { useAuth } from '@/lib/auth-context'
 import { api, extractErrorMessage } from '@/lib/api'
-import { displayText } from '@/lib/text'
+import { displayDate, displayText } from '@/lib/text'
 import type { Device, User } from '@/lib/types'
 
 const sectionHeading = 'text-sm font-semibold uppercase tracking-wide text-slate-500'
@@ -92,13 +92,40 @@ function DeviceList() {
   )
 }
 
+/** Badge text and colour for the face enrollment, including instructor approval. */
+function faceBadge(user: User): { label: string; className: string } {
+  const approvedOn = displayDate(user.face_enrollment_reviewed_at)
+  if (user.face_enrollment_status === 'pending') {
+    return { label: 'Face enrollment: awaiting approval', className: 'bg-amber-50 text-amber-800' }
+  }
+  if (user.face_enrolled) {
+    return {
+      label:
+        user.face_enrollment_status === 'approved' && approvedOn
+          ? `Face enrolled: approved ${approvedOn}`
+          : 'Face enrolled: Yes',
+      className: 'bg-green-50 text-green-700',
+    }
+  }
+  if (user.face_enrollment_status === 'rejected') {
+    return { label: 'Face enrollment: not approved', className: 'bg-red-50 text-red-700' }
+  }
+  return { label: 'Face enrolled: No', className: 'bg-slate-100 text-slate-600' }
+}
+
 function ProfileContent() {
-  const { user, updateUser } = useAuth()
+  const { user, updateUser, refreshUser } = useAuth()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
+  // An instructor may have approved or rejected the face enrollment meanwhile.
+  useEffect(() => {
+    refreshUser()
+  }, [refreshUser])
+
   if (!user) return null
+  const badge = faceBadge(user)
 
   async function updateConsent(field: 'camera_consent' | 'geolocation_consent', value: boolean) {
     setSaving(true)
@@ -128,13 +155,7 @@ function ProfileContent() {
           <p className="truncate text-sm text-slate-500">{user.email}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <span className="badge bg-slate-100 text-slate-700">{user.role}</span>
-            <span
-              className={`badge normal-case ${
-                user.face_enrolled ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              Face enrolled: {user.face_enrolled ? 'Yes' : 'No'}
-            </span>
+            <span className={`badge normal-case ${badge.className}`}>{badge.label}</span>
           </div>
         </div>
       </div>
