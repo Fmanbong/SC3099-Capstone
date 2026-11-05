@@ -21,7 +21,11 @@ class Timestamps:
 
 class User(Identified, Timestamps, Base):
     __tablename__ = 'users'
-    __table_args__ = (CheckConstraint("role IN ('student','ta','instructor','admin')"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('student','ta','instructor','admin')"),
+        CheckConstraint("face_enrollment_status IN ('none','pending','approved','rejected')",
+                        name='ck_users_face_enrollment_status'),
+    )
     email = Column(String(255), unique=True, nullable=False)
     full_name = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False)
@@ -32,6 +36,14 @@ class User(Identified, Timestamps, Base):
     geolocation_consent = Column(Boolean, default=False, nullable=False)
     face_embedding_hash = Column(String(256))
     face_enrolled = Column(Boolean, default=False, nullable=False)
+    # Staff approval of face enrollments (FACE_ENROLLMENT_APPROVAL). The approved
+    # template stays in face_embedding_hash; a new one waits in pending_face_hash.
+    face_enrollment_status = Column(String(20), default='none', nullable=False, index=True)
+    pending_face_hash = Column(String(256))
+    face_enrollment_requested_at = Column(UTCDateTime)
+    face_enrollment_reviewed_by_id = Column(String(36), ForeignKey('users.id', ondelete='SET NULL'))
+    face_enrollment_reviewed_at = Column(UTCDateTime)
+    face_enrollment_review_notes = Column(Text)
     last_login_at = Column(UTCDateTime)
     scheduled_deletion_at = Column(UTCDateTime, index=True)
 

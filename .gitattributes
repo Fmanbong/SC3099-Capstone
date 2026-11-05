@@ -1,0 +1,4 @@
+# Hash-checked against app/data/manifest.json at startup: keep the bytes exact
+# (no CRLF conversion on Windows checkouts), or the backend refuses to load them.
+module2-backend/app/data/*.json -text
+module2-backend/app/data/*.geojson -text

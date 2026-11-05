@@ -15,8 +15,8 @@ def apply_theme():
 @contextmanager
 def panel():
     with st.container(border=True):
-        st.markdown('<span class="saiv-panel-anchor" aria-hidden="true"></span>', unsafe_allow_html=True)
-        yield
+         st.markdown('<span class="saiv-panel-anchor" aria-hidden="true"></span>', unsafe_allow_html=True)
+         yield
 
 def brand():
     st.markdown('''<div class="saiv-brand"><span class="saiv-mark" aria-hidden="true">s</span>
@@ -27,9 +27,9 @@ def profile(name, role):
     st.markdown(f'''<div class="saiv-profile"><span class="saiv-avatar">{escape(initials)}</span>
         <div><strong>{escape(name)}</strong><span>{escape(role.capitalize())}</span></div></div>''', unsafe_allow_html=True)
 
-def detail_header(title, subtitle, status):
+def detail_header(title, subtitle, status, label=None):
     kinds = status if status in {"active", "approved", "flagged", "appealed", "pending", "closed", "cancelled", "rejected", "scheduled"} else "scheduled"
-    label = {"pending": "Re-check requested"}.get(status, status.capitalize())
+    label = label or {"pending": "Re-check requested"}.get(status, status.capitalize())
     st.markdown(f'''<div class="saiv-detail-heading"><div><h3>{escape(str(title))}</h3>
         <p>{escape(str(subtitle))}</p></div><span class="saiv-status saiv-status-{kinds}">{escape(label)}</span></div>''', unsafe_allow_html=True)
 

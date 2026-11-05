@@ -9,6 +9,11 @@ export interface User {
   camera_consent?: boolean
   geolocation_consent?: boolean
   face_enrolled?: boolean
+  /** 'pending' only when instructor approval of enrollments is switched on. */
+  face_enrollment_status?: 'none' | 'pending' | 'approved' | 'rejected'
+  face_enrollment_review_notes?: string | null
+  /** Set when staff approved or rejected the latest enrollment; absent for self-approved ones. */
+  face_enrollment_reviewed_at?: string | null
   created_at?: string
 }
 
