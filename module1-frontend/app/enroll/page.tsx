@@ -1,15 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import ConsentPrompt from '@/components/ConsentPrompt'
 import CameraCapture from '@/components/CameraCapture'
 import Alert from '@/components/Alert'
 import Spinner from '@/components/Spinner'
-import { CameraIcon, CheckCircleIcon } from '@/components/icons'
+import { CameraIcon, CheckCircleIcon, ClockIcon } from '@/components/icons'
 import { useAuth } from '@/lib/auth-context'
 import { api, extractErrorMessage } from '@/lib/api'
+import { displayDate, displayText } from '@/lib/text'
 
 /** Green tick card used for both "already enrolled" and "just enrolled". */
 function EnrolledCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -25,13 +26,43 @@ function EnrolledCard({ title, children }: { title: string; children: React.Reac
 }
 
 function EnrollFlow() {
-  const { user, updateUser } = useAuth()
+  const { user, updateUser, refreshUser } = useAuth()
   const router = useRouter()
   const [grantingConsent, setGrantingConsent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [reenrolling, setReenrolling] = useState(false)
+  const reviewNote = displayText(user?.face_enrollment_review_notes)
+
+  // The instructor decides elsewhere, so reload the status whenever this page opens.
+  useEffect(() => {
+    refreshUser()
+  }, [refreshUser])
+
+  // Shown while an instructor still has to approve the enrollment in person.
+  if (user?.face_enrollment_status === 'pending' && !reenrolling) {
+    return (
+      <div className="card space-y-4 px-6 py-8 text-center" role="status">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+          <ClockIcon className="h-9 w-9" />
+        </div>
+        <p className="text-lg font-semibold">Waiting for instructor approval</p>
+        <p className="text-sm text-slate-600">
+          Show this screen and your student card to your instructor so they can approve your face
+          enrollment.
+        </p>
+        <p className="text-sm text-slate-500">
+          {user.face_enrolled
+            ? 'Your previously approved face keeps working for check-in until then.'
+            : 'Check-ins that require face verification will be available once it is approved.'}
+        </p>
+        <button onClick={() => setReenrolling(true)} className="btn btn-secondary w-full">
+          Retake photo
+        </button>
+      </div>
+    )
+  }
 
   // Checked before `face_enrolled` below: a successful enrollment sets both,
   // and the user should see the confirmation with the button to check in.
@@ -51,6 +82,18 @@ function EnrollFlow() {
         <p className="text-sm text-slate-600">
           You&apos;re all set for check-ins that require face verification.
         </p>
+        {user.face_enrollment_status === 'approved' && user.face_enrollment_reviewed_at && (
+          <Alert type="success">
+            Approved by your instructor on {displayDate(user.face_enrollment_reviewed_at)}
+            {reviewNote ? `: ${reviewNote}` : '.'}
+          </Alert>
+        )}
+        {user.face_enrollment_status === 'rejected' && (
+          <Alert type="warning">
+            Your latest re-enrollment was not approved{reviewNote ? `: ${reviewNote}` : '.'} Your
+            previously approved face is still in use.
+          </Alert>
+        )}
         {/* Matching works best when enrollment looks like a check-in, e.g. glasses on or off. */}
         <p className="text-sm text-slate-500">
           Changed your look (glasses, hairstyle) or keep getting flagged? Re-enroll to replace your
@@ -92,6 +135,12 @@ function EnrollFlow() {
   return (
     <div className="space-y-4">
       {error && <Alert type="error">{error}</Alert>}
+      {user?.face_enrollment_status === 'rejected' && !user.face_enrolled && (
+        <Alert type="warning">
+          Your instructor did not approve your last enrollment{reviewNote ? `: ${reviewNote}` : '.'}{' '}
+          Please enroll again, then show your instructor.
+        </Alert>
+      )}
       <div className="card space-y-4 p-5">
         <CameraCapture
           instructions={
@@ -104,7 +153,11 @@ function EnrollFlow() {
             setError(null)
             try {
               const res = await api.post('/users/me/face/enroll', { image })
-              if (res.data?.face_enrolled) {
+              if (res.data?.approval_pending) {
+                // Held for in-person approval; the pending card replaces the camera.
+                updateUser({ face_enrollment_status: 'pending', face_enrollment_review_notes: null })
+                setReenrolling(false)
+              } else if (res.data?.face_enrolled) {
                 updateUser({ face_enrolled: true })
                 setSuccess(true)
               } else {

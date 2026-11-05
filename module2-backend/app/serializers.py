@@ -9,7 +9,7 @@ def fields(obj, excluded=()):
 
 
 def user_data(obj, db=None):
-    return fields(obj, {'hashed_password', 'face_embedding_hash'})
+    return fields(obj, {'hashed_password', 'face_embedding_hash', 'pending_face_hash'})
 
 
 def course_data(obj, db=None):

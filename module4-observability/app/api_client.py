@@ -279,6 +279,16 @@ class APIClient:
         # mark attendance pending for a fresh student submission
         return self.post(f"/api/v1/checkins/{checkin_id}/reverify", {"review_notes": review_notes})
 
+    def get_pending_face_enrollments(self, limit=50, offset=0):
+        # only filled when the backend runs with FACE_ENROLLMENT_APPROVAL on
+        return self.page(self.get("/api/v1/users/face-enrollments/pending", {"limit": limit, "offset": offset}))
+
+    def approve_face_enrollment(self, user_id, review_notes=None):
+        return self.post(f"/api/v1/users/{user_id}/face-enrollment/approve", {"review_notes": review_notes})
+
+    def reject_face_enrollment(self, user_id, review_notes):
+        return self.post(f"/api/v1/users/{user_id}/face-enrollment/reject", {"review_notes": review_notes})
+
     def get_overview_stats(self, course_id=None, days=7):
         params = {"days": days}
         if  course_id is not None:

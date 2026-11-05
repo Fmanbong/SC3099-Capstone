@@ -173,6 +173,8 @@ def submit_checkin(
         missing_required_evidence = True
     if face_required and (not user.face_enrolled or not user.face_embedding_hash):
         if not settings.public_test_mode:
+            if user.face_enrollment_status == "pending":
+                raise ApiError(400, "Your face enrollment is awaiting instructor approval", "FACE_ENROLLMENT_PENDING")
             raise ApiError(400, "Face enrollment is required", "FACE_ENROLLMENT_REQUIRED")
         factors.append(factor("face_enrollment_missing", 0.8, 0.25, "high"))
         missing_required_evidence = True

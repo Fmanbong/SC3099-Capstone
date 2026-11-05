@@ -317,15 +317,25 @@ function CheckinFlow() {
     return (
       <div className="space-y-3">
         {error && <Alert type="error">{error}</Alert>}
-        {faceEnrollmentNeeded && (
-          <Alert type="warning">
-            This session requires face verification.{' '}
-            <Link href="/enroll" className="underline font-medium">
-              Enroll your face
-            </Link>{' '}
-            first, then come back to check in.
-          </Alert>
-        )}
+        {faceEnrollmentNeeded &&
+          (user?.face_enrollment_status === 'pending' ? (
+            <Alert type="warning">
+              This session requires face verification, and your face enrollment is still waiting for
+              instructor approval. Show your instructor your{' '}
+              <Link href="/enroll" className="underline font-medium">
+                enrollment screen
+              </Link>{' '}
+              and student card, then come back to check in.
+            </Alert>
+          ) : (
+            <Alert type="warning">
+              This session requires face verification.{' '}
+              <Link href="/enroll" className="underline font-medium">
+                Enroll your face
+              </Link>{' '}
+              first, then come back to check in.
+            </Alert>
+          ))}
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Open Check-ins

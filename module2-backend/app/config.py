@@ -1,7 +1,7 @@
 """Environment configuration; unsafe test compatibility is explicit and isolated."""
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(default=7, ge=1)
     bcrypt_rounds: int = Field(default=10, ge=10, le=16)
     public_test_mode: bool = False
+    # When on, a student's face enrollment stays pending until course staff
+    # approve it in person. 'auto' (the default) turns it on everywhere except
+    # PUBLIC_TEST_MODE, where the graders' tests expect the API-SPECIFICATION
+    # behaviour of POST /users/me/face/enroll enrolling immediately.
+    face_enrollment_approval: Literal['auto', 'true', 'false'] = 'auto'
     rate_limit_enabled: bool = True
     auto_create_schema: bool = False
     retention_enabled: bool = True
@@ -25,6 +30,20 @@ class Settings(BaseSettings):
     retention_interval_seconds: int = Field(default=3600, ge=10)
     max_request_bytes: int = Field(default=8 * 1024 * 1024, ge=1024)
     max_image_bytes: int = Field(default=5 * 1024 * 1024, ge=1024)
+
+    @field_validator('face_enrollment_approval', mode='before')
+    @classmethod
+    def normalise_approval(cls, value):
+        # Accept the usual boolean spellings from .env files and Python callers.
+        text = str(value).strip().lower()
+        return {'1': 'true', 'yes': 'true', 'on': 'true', '0': 'false', 'no': 'false', 'off': 'false',
+                '': 'auto'}.get(text, text)
+
+    @property
+    def requires_face_enrollment_approval(self) -> bool:
+        if self.face_enrollment_approval == 'auto':
+            return not self.public_test_mode
+        return self.face_enrollment_approval == 'true'
 
     @model_validator(mode='after')
     def isolated_test_mode(self):

@@ -582,6 +582,42 @@ def checkin_details(checkin_id):
     else:
         st.caption("THIS RECORD HAS NO PENDING REVIEW")
 
+def face_enrollments_page():
+    page_intro("FACE ENROLLMENTS", "APPROVE A STUDENT'S FACE ONLY AFTER CONFIRMING THEIR IDENTITY IN PERSON")
+    api  = st.session_state.api
+    data = api.get_pending_face_enrollments()
+    if  not data["items"]:
+        empty_state("NO ENROLLMENTS WAITING", "STUDENTS APPEAR HERE AFTER ENROLLING WHEN APPROVAL IS SWITCHED ON")
+        return
+    # face photos are never stored, so the in-person check is the identity evidence
+    st.caption(f"{data['total']} WAITING · ASK THE STUDENT FOR THEIR STUDENT CARD AND ENROLLMENT SCREEN BEFORE DECIDING")
+    for item in data["items"]:
+        sid = item["id"]
+        with panel():
+             detail_header(item["full_name"].upper(), item["email"], "pending", label="Awaiting approval")
+             metadata([
+                 ("COURSES", ", ".join(item["courses"]) or "—"),
+                 ("SUBMITTED", display_time(item["requested_at"])),
+                 ("REPLACES AN APPROVED FACE", "YES" if item["replaces_existing_face"] else "NO"),
+             ])
+             with st.form(f"face_review_{sid}"):
+                  decision = st.radio("DECISION", ["approve", "reject"], horizontal=True, key=f"face_decision_{sid}", format_func=str.upper)
+                  notes    = st.text_area("NOTES", max_chars=2000, height=70, key=f"face_notes_{sid}",
+                                          placeholder="E.G. CHECKED STUDENT CARD IN LT26 · A REASON IS REQUIRED WHEN REJECTING")
+                  confirm  = st.checkbox("I CHECKED THIS STUDENT'S IDENTITY IN PERSON", key=f"face_confirm_{sid}")
+                  submitted = submit_button("SUBMIT DECISION")
+        if  submitted:
+            if  not confirm:
+                st.error("CONFIRM YOU CHECKED THE STUDENT'S IDENTITY IN PERSON BEFORE DECIDING")
+            elif decision == "reject" and not notes.strip():
+                st.error("GIVE THE STUDENT A REASON FOR THE REJECTION")
+            elif decision == "approve":
+                api.approve_face_enrollment(sid, notes.strip() or None)
+                changed(f"FACE ENROLLMENT APPROVED FOR {item['full_name'].upper()}")
+            else:
+                api.reject_face_enrollment(sid, notes.strip())
+                changed(f"FACE ENROLLMENT REJECTED FOR {item['full_name'].upper()}. THEY CAN ENROLL AGAIN")
+
 def checkins_page():
     page_intro("CHECK-INS", "ATTENDANCE RECORDS AND REVIEW DECISIONS")
     api = st.session_state.api
@@ -829,7 +865,8 @@ if  not st.session_state.api.token:
 
 with st.sidebar: brand()
 
-navigation_labels = {"Overview": "OVERVIEW", "Sessions": "SESSIONS", "Check-ins": "CHECKINS", "Audit logs": "SYS LOGS - AUDIT", "Metrics": "MEASURES"}
+navigation_labels = {"Overview": "OVERVIEW", "Sessions": "SESSIONS", "Check-ins": "CHECKINS", "Face enrollments": "FACE ENROLLMENTS",
+                     "Audit logs": "SYS LOGS - AUDIT", "Metrics": "MEASURES"}
 page = st.sidebar.radio("Navigation",options=list(navigation_labels),format_func=lambda value: navigation_labels[value],key="navigation",label_visibility="collapsed")
 
 try:
@@ -864,7 +901,8 @@ notice = st.session_state.pop("notice", None)
 if  notice:
     st.success(notice)
 try:
-    {"Overview": overview_page, "Sessions": sessions_page, "Check-ins": checkins_page, "Audit logs": audit_page, "Metrics": metrics_page}[page]()
+    {"Overview": overview_page, "Sessions": sessions_page, "Check-ins": checkins_page, "Face enrollments": face_enrollments_page,
+     "Audit logs": audit_page, "Metrics": metrics_page}[page]()
 except APIError as exc:
     # invalidate prepared exports after an authorization failure
     st.session_state.pop("prepared_export", None)

@@ -52,6 +52,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       PUBLIC_TEST_MODE: ${PUBLIC_TEST_MODE:-false}
+      # auto = staff approve face enrollments, except in PUBLIC_TEST_MODE (spec behaviour)
+      FACE_ENROLLMENT_APPROVAL: ${FACE_ENROLLMENT_APPROVAL:-auto}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:8501"]}
       FACE_SERVICE_URL: http://face-recognition:8001
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
